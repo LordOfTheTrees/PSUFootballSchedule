@@ -1,0 +1,3 @@
+to debug: 
+since there is no year, it is breaking and dates dont work
+it also doesnt understand that TBA is the broadcasting partner if listed
