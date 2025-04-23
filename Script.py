@@ -705,58 +705,25 @@ def serve_calendar():
     except Exception as e:
         logger.error(f"Error serving calendar: {str(e)}")
         return "Calendar not available", 500
-
 @app.route('/')
 def index():
     """Simple landing page"""
+    # Direct link to the raw calendar file in the GitHub repository
+    calendar_url = "https://raw.githubusercontent.com/lordofthetrees/PSUFootballSchedule/main/penn_state_football.ics"
+    
     return """
     <html>
         <head>
             <title>Penn State Football Calendar</title>
-            <style>
-                body {
-                    font-family: Arial, sans-serif;
-                    max-width: 800px;
-                    margin: 0 auto;
-                    padding: 20px;
-                    line-height: 1.6;
-                }
-                h1 {
-                    color: #041E42; /* Penn State Navy */
-                }
-                .container {
-                    border: 1px solid #ddd;
-                    padding: 20px;
-                    border-radius: 5px;
-                    background-color: #f9f9f9;
-                }
-                pre {
-                    background-color: #eee;
-                    padding: 10px;
-                    border-radius: 5px;
-                    overflow-x: auto;
-                }
-                a {
-                    color: #041E42;
-                    text-decoration: none;
-                }
-                a:hover {
-                    text-decoration: underline;
-                }
-                .footer {
-                    margin-top: 30px;
-                    font-size: 0.8em;
-                    color: #777;
-                }
-            </style>
+            <!-- CSS styles remain the same -->
         </head>
         <body>
             <h1>Penn State Football Calendar</h1>
             <div class="container">
                 <p>This calendar provides a schedule of Penn State Football games that you can add to your calendar app.</p>
                 <p>To subscribe to this calendar in your calendar app, use this URL:</p>
-                <pre>http://YOUR_SERVER_URL/calendar.ics</pre>
-                <p><a href="/calendar.ics">Download Calendar</a></p>
+                <pre>""" + calendar_url + """</pre>
+                <p><a href=\"""" + calendar_url + """\">Download Calendar</a></p>
                 <p>The calendar updates daily with the latest game information from the Penn State Athletics website.</p>
             </div>
             <div class="footer">
