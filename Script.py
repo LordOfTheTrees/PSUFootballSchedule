@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 # Initialize Flask app
 app = Flask(__name__)
 
-# Base URL for Penn State football - This is the correct, updated URL
-BASE_URL = "https://gopsusports.com/sports/football/schedule/"
+# Base URL for Penn State football
+BASE_URL = "https://gopsusports.com/sports/football/schedule?view=list"
 CALENDAR_FILE = "penn_state_football.ics"
 
 def parse_date_time(date_str, time_str):
@@ -30,89 +30,171 @@ def parse_date_time(date_str, time_str):
     try:
         logger.info(f"Parsing date: '{date_str}', time: '{time_str}'")
         
-        # Handle various date formats
-        if "/" in date_str:  # Format: MM/DD/YYYY
-            date_parts = date_str.strip().split('/')
-            month, day, year = int(date_parts[0]), int(date_parts[1]), int(date_parts[2])
-        else:  # Format: Month Day, Year (e.g., "August 31, 2024")
-            # Remove any day of week prefix if present
-            if "," in date_str:
-                date_str = date_str.split(",", 1)[1].strip() if date_str.count(",") > 1 else date_str
-            
-            # Clean and parse the date string
-            date_str = re.sub(r'\s+', ' ', date_str.strip())
-            date_parts = date_str.replace(",", "").split()
-            
-            if len(date_parts) >= 3:
-                month_str, day_str, year_str = date_parts[0], date_parts[1], date_parts[2]
-                
-                # Convert month name to number
-                month_dict = {
-                    'Jan': 1, 'January': 1, 
-                    'Feb': 2, 'February': 2, 
-                    'Mar': 3, 'March': 3, 
-                    'Apr': 4, 'April': 4, 
-                    'May': 5, 
-                    'Jun': 6, 'June': 6, 
-                    'Jul': 7, 'July': 7, 
-                    'Aug': 8, 'August': 8, 
-                    'Sep': 9, 'Sept': 9, 'September': 9, 
-                    'Oct': 10, 'October': 10, 
-                    'Nov': 11, 'November': 11, 
-                    'Dec': 12, 'December': 12
-                }
-                
-                month = month_dict.get(month_str, None)
-                if month is None:
-                    # Try getting the month by the first 3 letters
-                    month = month_dict.get(month_str[:3], 1)
-                
-                day = int(day_str)
-                year = int(year_str)
-            else:
-                logger.warning(f"Unexpected date format: {date_str}, using default")
-                # Default to a future date if we can't parse
-                now = datetime.datetime.now()
-                month, day, year = now.month, now.day, now.year
+        # First, determine the current football season year
+        today = datetime.datetime.now()
+        current_year = today.year
+        current_month = today.month
         
-        # Parse time (if available)
-        if time_str and time_str.lower() not in ["tba", "tbd"]:
-            # Handle AM/PM
-            time_str = time_str.strip().upper()
-            
-            # Extract the time part if there's additional text
-            time_match = re.search(r'(\d+:?\d*\s*[AP]M)', time_str)
-            if time_match:
-                time_str = time_match.group(1)
-            
-            if ":" in time_str:
-                time_parts = time_str.replace("AM", "").replace("PM", "").strip().split(':')
-                hour = int(time_parts[0])
-                minute = int(time_parts[1]) if len(time_parts) > 1 else 0
-            else:
-                # Handle cases where time might just be "12 PM" without colon
-                hour_match = re.search(r'(\d+)\s*[AP]M', time_str)
-                if hour_match:
-                    hour = int(hour_match.group(1))
-                    minute = 0
-                else:
-                    hour, minute = 12, 0  # Default
-            
-            # Adjust for PM
-            if "PM" in time_str and hour < 12:
-                hour += 12
-            # Adjust for 12 AM
-            if "AM" in time_str and hour == 12:
-                hour = 0
-                
-            return datetime.datetime(year, month, day, hour, minute)
+        # If we're in February or later, we're likely looking at the upcoming season
+        if current_month >= 2:
+            football_season_year = current_year
         else:
-            # If no time is provided, use noon as default
-            return datetime.datetime(year, month, day, 12, 0)
+            football_season_year = current_year - 1
+            
+        logger.info(f"Current date: {today}, determined football season year: {football_season_year}")
+        
+        # Clean up the input date string
+        # Fix cases like "SaturdayNov 22" where day of week and month are joined
+        weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        cleaned_date_str = date_str
+        
+        # Try to split day of week from month when they're joined
+        for day in weekdays:
+            if day.lower() in date_str.lower():
+                # Find where the weekday ends
+                day_pos = date_str.lower().find(day.lower()) + len(day)
+                if day_pos < len(date_str):
+                    # Insert a space after the weekday if there isn't one
+                    if date_str[day_pos:day_pos+1] != ' ':
+                        cleaned_date_str = date_str[:day_pos] + ' ' + date_str[day_pos:]
+                        logger.info(f"Fixed joined weekday-month: '{date_str}' -> '{cleaned_date_str}'")
+                        break
+        
+        date_str = cleaned_date_str
+        
+        # Extract year, month, day
+        year = None
+        month = None
+        day = None
+        
+        # Try various date formats
+        # Format 1: MM/DD/YYYY
+        if "/" in date_str and len(date_str.split("/")) >= 2:
+            parts = date_str.strip().split("/")
+            try:
+                month = int(parts[0])
+                day = int(parts[1])
+                if len(parts) > 2 and parts[2].strip():
+                    year = int(parts[2])
+                    if year < 100:
+                        year += 2000
+            except (ValueError, IndexError):
+                logger.warning(f"Failed to parse MM/DD/YYYY format: {date_str}")
+        
+        # Format 2: Month + Day pattern
+        # This format handles various cases like:
+        # - "April 26, 2025"
+        # - "April 26" 
+        # - "Apr 26"
+        # - "Saturday Apr 26"
+        # - "Saturday, Apr 26"
+        else:
+            # Define month mapping
+            month_map = {
+                'january': 1, 'jan': 1,
+                'february': 2, 'feb': 2,
+                'march': 3, 'mar': 3,
+                'april': 4, 'apr': 4,
+                'may': 5,
+                'june': 6, 'jun': 6,
+                'july': 7, 'jul': 7,
+                'august': 8, 'aug': 8,
+                'september': 9, 'sep': 9, 'sept': 9,
+                'october': 10, 'oct': 10,
+                'november': 11, 'nov': 11,
+                'december': 12, 'dec': 12
+            }
+            
+            # Try to find any month name in the string
+            for month_name, month_num in month_map.items():
+                if month_name.lower() in date_str.lower():
+                    month = month_num
+                    logger.info(f"Found month '{month_name}' -> {month}")
+                    
+                    # Now find the day number that follows the month
+                    month_pos = date_str.lower().find(month_name.lower())
+                    after_month = date_str[month_pos + len(month_name):]
+                    
+                    # Find day after month
+                    day_match = re.search(r'\b(\d{1,2})\b', after_month)
+                    if day_match:
+                        day = int(day_match.group(1))
+                        logger.info(f"Found day: {day}")
+                    else:
+                        # If day is not after month, try to find any number in the string
+                        day_match = re.search(r'\b(\d{1,2})\b', date_str)
+                        if day_match:
+                            day = int(day_match.group(1))
+                            logger.info(f"Found day anywhere in string: {day}")
+                    
+                    break
+        
+        # If we have month and day but no year, determine year based on football season
+        if month is not None and day is not None:
+            if year is None:
+                # For college football:
+                # Spring games (April) are in the next calendar year
+                # August-December games are in the current football season year
+                # January games (bowl games) are in the next calendar year
+                if month == 4:  # April (spring game)
+                    year = football_season_year + 1
+                elif month >= 8:  # August-December
+                    year = football_season_year
+                else:  # January-July (except April)
+                    year = football_season_year + 1
+                
+                logger.info(f"Determined year {year} based on month {month} and football season")
+            
+            # Parse time (if available)
+            if time_str and time_str.lower() not in ["tba", "tbd"]:
+                # Handle AM/PM
+                time_str = time_str.strip().upper()
+                
+                # Extract the time part if there's additional text
+                time_match = re.search(r'(\d+:?\d*\s*[AP]M)', time_str)
+                if time_match:
+                    time_str = time_match.group(1)
+                
+                if ":" in time_str:
+                    time_parts = time_str.replace("AM", "").replace("PM", "").strip().split(':')
+                    hour = int(time_parts[0])
+                    minute = int(time_parts[1]) if len(time_parts) > 1 else 0
+                else:
+                    # Handle cases where time might just be "12 PM" without colon
+                    hour_match = re.search(r'(\d+)\s*[AP]M', time_str)
+                    if hour_match:
+                        hour = int(hour_match.group(1))
+                        minute = 0
+                    else:
+                        hour, minute = 13, 0  # Default to 1 PM
+                
+                # Adjust for PM
+                if "PM" in time_str and hour < 12:
+                    hour += 12
+                # Adjust for 12 AM
+                if "AM" in time_str and hour == 12:
+                    hour = 0
+            else:
+                # If time is TBA or TBD, use 1 PM ET (13:00 local)
+                hour, minute = 13, 0
+            
+            # Create the datetime object
+            try:
+                game_datetime = datetime.datetime(year, month, day, hour, minute)
+                logger.info(f"Final parsed date and time: {game_datetime}")
+                return game_datetime
+            except ValueError as e:
+                logger.error(f"Invalid date components: year={year}, month={month}, day={day}, hour={hour}, minute={minute}")
+                logger.error(f"ValueError: {str(e)}")
+                raise
+        else:
+            logger.warning(f"Failed to extract complete date from: {date_str}")
+            raise ValueError(f"Could not parse date from: {date_str}")
+    
     except Exception as e:
         logger.error(f"Error parsing date/time: {date_str}, {time_str} - {str(e)}")
-        # Return a placeholder date in the future
-        return datetime.datetime.now() + datetime.timedelta(days=30)
+        # Return None to indicate parsing failure, caller should handle this
+        return None
 
 def scrape_schedule():
     """Scrape the Penn State football schedule and return game details"""
@@ -133,54 +215,63 @@ def scrape_schedule():
         # Try multiple possible schedule containers and item selectors
         schedule_items = []
         
-        # Attempt 1: Modern Sidearm schedule format
-        items = soup.select('.sidearm-schedule-games-container .sidearm-schedule-game')
-        if items:
-            logger.info(f"Found {len(items)} items using .sidearm-schedule-games-container selector")
-            schedule_items = items
+        # Common container class names for schedule items
+        container_selectors = [
+            '.sidearm-schedule-games-container',
+            '.schedule-content-wrapper',
+            '.s-game-listing',
+            'table.schedule',
+            '.schedule__content',
+            '.schedule-table',
+            'ul.schedule-list'
+        ]
         
-        # Attempt 2: Look for event rows or schedule cards
-        if not schedule_items:
-            items = soup.select('.event-row, .schedule-card')
-            if items:
-                logger.info(f"Found {len(items)} items using .event-row or .schedule-card selectors")
-                schedule_items = items
+        # First attempt to find the main container
+        main_container = None
+        for selector in container_selectors:
+            main_container = soup.select_one(selector)
+            if main_container:
+                logger.info(f"Found main container with selector: {selector}")
+                break
         
-        # Attempt 3: Look for sports_schedule content
-        if not schedule_items:
-            items = soup.select('.s-game, .sports_schedule .contest')
-            if items:
-                logger.info(f"Found {len(items)} items using sports_schedule selectors")
-                schedule_items = items
+        # If we found a container, find the game items within it
+        if main_container:
+            item_selectors = [
+                '.sidearm-schedule-game',
+                '.schedule-game',
+                '.event-item',
+                'tr.event-row',
+                'li.schedule-item',
+                'div[class*="game"]',
+                'div[class*="event"]'
+            ]
+            
+            for selector in item_selectors:
+                items = main_container.select(selector)
+                if items:
+                    logger.info(f"Found {len(items)} items using selector: {selector}")
+                    schedule_items = items
+                    break
         
-        # Attempt 4: Look for table rows in schedule tables
+        # If we still don't have items, try to find them directly in the whole page
         if not schedule_items:
-            tables = soup.select('table.schedule_table, table.schedule')
-            if tables:
-                for table in tables:
-                    rows = table.select('tr[data-day]') or table.select('tr')
-                    if rows:
-                        logger.info(f"Found {len(rows)} rows in schedule table")
-                        schedule_items.extend(rows)
-                        
-        # Attempt 5: Look for main content div with schedule information
-        if not schedule_items:
-            main_content = soup.select_one('.main-content, #main-content')
-            if main_content:
-                # Find elements that look like game rows/cards
-                game_divs = main_content.select('div[class*="game"], div[class*="event"], div[class*="contest"]')
-                if game_divs:
-                    logger.info(f"Found {len(game_divs)} potential game divs in main content")
-                    schedule_items = game_divs
+            all_selectors = [
+                '.sidearm-schedule-game',
+                '.s-game',
+                '.event-row',
+                '.schedule-card',
+                'tr[data-day]',
+                'div[class*="game"], div[class*="event"], div[class*="contest"]'
+            ]
+            
+            for selector in all_selectors:
+                items = soup.select(selector)
+                if items:
+                    logger.info(f"Found {len(items)} items using direct selector: {selector}")
+                    schedule_items = items
+                    break
         
-        # Fallback approach - find any div with game or event in the class name
-        if not schedule_items:
-            all_possible_items = soup.select('[class*="game"], [class*="event"], [class*="contest"]')
-            if all_possible_items:
-                logger.info(f"Fallback: Found {len(all_possible_items)} potential game/event elements")
-                schedule_items = all_possible_items
-        
-        # If we found items through any method, process them
+        # If we found schedule items, process them
         if schedule_items:
             logger.info(f"Processing {len(schedule_items)} schedule items")
             
@@ -189,100 +280,125 @@ def scrape_schedule():
                     # Dump the HTML of the first few items for debugging
                     if len(games) < 2:
                         logger.info(f"Sample item HTML: {item}")
-                        
-                    # Extract date - try multiple possible selectors
-                    date_elem = None
+                    
+                    # Extract date - using improved selectors
+                    date_str = ""
                     date_selectors = [
-                        '.date, [data-date], [class*="date"], [id*="date"]',
+                        '.date, [data-date], [class*="date"], time, [datetime]',
                         'span[class*="date"], div[class*="date"]',
-                        'time, [datetime]',
+                        'time[datetime]',
                         '.event-date, .game-date, .contest-date'
                     ]
                     
                     for selector in date_selectors:
-                        date_elem = item.select_one(selector)
-                        if date_elem:
-                            break
-                    
-                    # If we still don't have a date element, try text content
-                    if not date_elem:
-                        # Look for text that matches date patterns
-                        text_nodes = [t for t in item.stripped_strings]
-                        date_patterns = [
-                            r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2},? \d{4}\b',
-                            r'\b\d{1,2}/\d{1,2}/\d{2,4}\b'
-                        ]
-                        
-                        for text in text_nodes:
-                            for pattern in date_patterns:
-                                match = re.search(pattern, text)
-                                if match:
-                                    date_str = match.group(0)
-                                    logger.info(f"Found date in text: {date_str}")
-                                    # Create a simple element to hold this text
-                                    date_elem = type('obj', (object,), {'text': date_str})
+                        date_elems = item.select(selector)
+                        if date_elems:
+                            # Try each element to find one with actual content
+                            for date_elem in date_elems:
+                                if date_elem.text.strip():
+                                    date_str = date_elem.text.strip()
+                                    logger.info(f"Found date: {date_str}")
                                     break
-                            if date_elem:
+                            if date_str:
                                 break
                     
-                    # Get the date string
-                    date_str = date_elem.text.strip() if date_elem else ""
-                    if not date_str and date_elem and date_elem.get('datetime'):
-                        date_str = date_elem.get('datetime')
-                        
-                    # Even if we don't find a date element, try to extract from item's text
+                    # Look for datetime attribute
                     if not date_str:
-                        # Try to find a date-formatted string in the item text
-                        item_text = ' '.join(item.stripped_strings)
-                        date_matches = re.findall(r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2},? \d{4}\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b', item_text)
-                        if date_matches:
-                            date_str = date_matches[0]
-                            logger.info(f"Extracted date from text: {date_str}")
+                        datetime_elem = item.select_one('[datetime]')
+                        if datetime_elem:
+                            date_str = datetime_elem.get('datetime')
+                            logger.info(f"Found date from datetime attribute: {date_str}")
                     
-                    # Extract time - try multiple possible selectors
-                    time_elem = None
+                    # If we still don't have a date, try to extract from text
+                    if not date_str:
+                        # Try to find date pattern in item text
+                        item_text = ' '.join(item.stripped_strings)
+                        date_patterns = [
+                            r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2},? \d{4}\b',
+                            r'\b\d{1,2}/\d{1,2}/\d{2,4}\b',
+                            r'\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\.?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}\b'
+                        ]
+                        
+                        for pattern in date_patterns:
+                            match = re.search(pattern, item_text)
+                            if match:
+                                date_str = match.group(0)
+                                logger.info(f"Extracted date from text: {date_str}")
+                                break
+                    # Around line 374 in the original code, after determining the game duration
+                    # and right before creating the game_info dictionary:
+
+                    
+                    # Skip if no date found
+                    if not date_str:
+                        logger.warning("No date found, skipping this item")
+                        continue
+                    
+                    # Extract time
+                    time_str = ""
                     time_selectors = [
-                        '.time, [data-time], [class*="time"], [id*="time"]',
+                        '.time, [data-time], [class*="time"]',
                         'span[class*="time"], div[class*="time"]',
-                        '.event-time, .game-time, .contest-time'
+                        '.event-time, .game-time'
                     ]
                     
                     for selector in time_selectors:
-                        time_elem = item.select_one(selector)
-                        if time_elem:
-                            break
+                        time_elems = item.select(selector)
+                        if time_elems:
+                            # Try each element to find one with actual content
+                            for time_elem in time_elems:
+                                if time_elem.text.strip():
+                                    time_str = time_elem.text.strip()
+                                    logger.info(f"Found time: {time_str}")
+                                    break
+                            if time_str:
+                                break
                     
-                    # Try to find time in text if no element
-                    time_str = time_elem.text.strip() if time_elem else ""
+                    # If no time found, try to extract from text
                     if not time_str:
-                        # Try to find time pattern in the item text
                         item_text = ' '.join(item.stripped_strings)
-                        time_matches = re.findall(r'\b\d{1,2}:\d{2}\s*[AP]M\b|\b\d{1,2}\s*[AP]M\b', item_text, re.IGNORECASE)
-                        if time_matches:
-                            time_str = time_matches[0]
-                            logger.info(f"Extracted time from text: {time_str}")
+                        time_patterns = [
+                            r'\b\d{1,2}:\d{2}\s*[AP]M\b',
+                            r'\b\d{1,2}\s*[AP]M\b',
+                            r'\bTBA\b',
+                            r'\bTBD\b'
+                        ]
+                        
+                        for pattern in time_patterns:
+                            match = re.search(pattern, item_text, re.IGNORECASE)
+                            if match:
+                                time_str = match.group(0)
+                                logger.info(f"Extracted time from text: {time_str}")
+                                break
                     
-                    # Extract opponent - try multiple possible selectors
-                    opponent_elem = None
+                    # If still no time, default to TBA
+                    if not time_str:
+                        time_str = "TBA"
+                        logger.info("No time found, defaulting to TBA")
+                    
+                    # Extract opponent
+                    opponent = "Unknown Opponent"
                     opponent_selectors = [
-                        '.opponent, [data-opponent], [class*="opponent"], [id*="opponent"]',
-                        '.team, [class*="team-name"]',
-                        '.event-opponent, .game-opponent, .contest-opponent',
-                        'a[href*="opponent"], a[href*="team"]',
-                        'span[class*="opponent"], div[class*="opponent"]'
+                        '.opponent, [data-opponent], [class*="opponent"]',
+                        '.team-name, [class*="team-name"]',
+                        '.event-opponent, .game-opponent',
+                        'a[href*="team"]'
                     ]
                     
                     for selector in opponent_selectors:
-                        opponent_elem = item.select_one(selector)
-                        if opponent_elem:
-                            break
+                        opponent_elems = item.select(selector)
+                        if opponent_elems:
+                            for opponent_elem in opponent_elems:
+                                if opponent_elem.text.strip():
+                                    opponent = opponent_elem.text.strip()
+                                    logger.info(f"Found opponent: {opponent}")
+                                    break
+                            if opponent != "Unknown Opponent":
+                                break
                     
-                    # If we don't have an opponent element, look for text patterns
-                    opponent = opponent_elem.text.strip() if opponent_elem else "Unknown Opponent"
+                    # If no opponent found, try to extract from text
                     if opponent == "Unknown Opponent":
-                        # Try to extract team names
                         item_text = ' '.join(item.stripped_strings)
-                        # Common opponent patterns like "vs Team Name" or "at Team Name"
                         opponent_patterns = [
                             r'(?:vs\.?|versus)\s+([A-Za-z\s&\.\']+)(?:\s|$)',
                             r'(?:at|@)\s+([A-Za-z\s&\.\']+)(?:\s|$)',
@@ -296,105 +412,109 @@ def scrape_schedule():
                                 logger.info(f"Extracted opponent from text: {opponent}")
                                 break
                     
-                    # Determine if home or away - try from location or opponent text
-                    location_elem = None
+                    # Determine if home or away
+                    is_home = True
+                    location = ""
+                    
+                    # Look for location information
                     location_selectors = [
-                        '.location, [data-location], [class*="location"], [id*="location"]',
+                        '.location, [data-location], [class*="location"]',
                         '.venue, [class*="venue"]',
-                        '.event-location, .game-location, .contest-location',
-                        'span[class*="location"], div[class*="location"]'
+                        '.event-location, .game-location'
                     ]
                     
                     for selector in location_selectors:
-                        location_elem = item.select_one(selector)
-                        if location_elem:
-                            break
+                        location_elems = item.select(selector)
+                        if location_elems:
+                            for location_elem in location_elems:
+                                if location_elem.text.strip():
+                                    location = location_elem.text.strip()
+                                    logger.info(f"Found location: {location}")
+                                    break
+                            if location:
+                                break
                     
-                    location = location_elem.text.strip() if location_elem else ""
-                    
-                    # Determine home/away status
-                    is_home = False
-                    
-                    # Check location text
+                    # Try to determine home/away status
                     if location:
                         is_home = any(term in location.lower() for term in ["beaver stadium", "university park", "home", "penn state"])
-                    
-                    # Check class name
-                    if not is_home:
-                        is_home = "home" in item.get('class', [])
-                    
-                    # Check opponent text (contains "vs" or doesn't contain "at")
-                    if not is_home:
-                        is_home = (
-                            ("vs" in opponent.lower() or "vs." in opponent.lower()) or
-                            not any(term in opponent.lower() for term in ["at ", "@ "])
-                        )
-                    
-                    # Check if the text of the item contains home indicators
-                    if not is_home:
+                    else:
+                        # Check item text for location indicators
                         item_text = ' '.join(item.stripped_strings)
-                        is_home = (
-                            "home" in item_text.lower() or
-                            "beaver stadium" in item_text.lower() or
-                            "university park" in item_text.lower()
-                        )
+                        if "at " in item_text.lower() or "@ " in item_text.lower():
+                            is_home = False
+                        elif "vs" in item_text.lower() or "vs." in item_text.lower():
+                            is_home = True
                     
-                    # Clean up opponent name (remove "vs " or "at " prefix if present)
+                    # Clean up opponent name
                     opponent = re.sub(r'^(?:vs\.?|versus|at|@)\s+', '', opponent).strip()
                     
                     # Extract broadcast info
-                    broadcast_elem = None
+                    broadcast = ""
                     broadcast_selectors = [
-                        '.network, [data-network], [class*="network"], [id*="network"]',
+                        '.network, [data-network], [class*="network"]',
                         '.broadcast, [class*="broadcast"], [class*="tv"]',
-                        '.event-network, .game-network',
-                        'span[class*="network"], div[class*="network"]'
+                        '.event-network, .game-network'
                     ]
                     
                     for selector in broadcast_selectors:
-                        broadcast_elem = item.select_one(selector)
-                        if broadcast_elem:
-                            break
-                    
-                    broadcast = broadcast_elem.text.strip() if broadcast_elem else ""
-                    
-                    # If we have no broadcast info, try to find TV/network info in text
-                    if not broadcast:
-                        item_text = ' '.join(item.stripped_strings)
-                        network_patterns = [
-                            r'(?:on|Live on|Watch on)\s+([A-Z0-9/&]+)',
-                            r'(?:ESPN|FOX|CBS|NBC|ABC|BTN|FS1)'
-                        ]
-                        
-                        for pattern in network_patterns:
-                            match = re.search(pattern, item_text)
-                            if match and len(match.groups()) > 0:
-                                broadcast = match.group(1).strip()
-                                logger.info(f"Extracted broadcast from text: {broadcast}")
-                                break
-                            elif match:
-                                broadcast = match.group(0).strip()
-                                logger.info(f"Extracted broadcast from text: {broadcast}")
+                        broadcast_elems = item.select(selector)
+                        if broadcast_elems:
+                            for broadcast_elem in broadcast_elems:
+                                if broadcast_elem.text.strip():
+                                    broadcast = broadcast_elem.text.strip()
+                                    logger.info(f"Found broadcast: {broadcast}")
+                                    break
+                            if broadcast:
                                 break
                     
-                    # Create readable title based on home/away status
+                    # If no broadcast info found, check if time is TBA
+                    if not broadcast and time_str and time_str.lower() in ["tba", "tbd"]:
+                        broadcast = "TBA"
+                        logger.info("Time is TBA, setting broadcast to TBA")
+                    
+                    # Create game title
                     if is_home:
                         title = f"{opponent} at Penn State"
                     else:
                         title = f"Penn State at {opponent}"
                     
-                    # Skip items without date information
-                    if not date_str:
-                        logger.warning(f"Skipping item without date information: {title}")
-                        continue
-                    
                     # Get datetime object
                     game_datetime = parse_date_time(date_str, time_str)
                     
-                    # Game duration (default 3.5 hours)
+                    # Game duration (3.5 hours)
                     duration = datetime.timedelta(hours=3, minutes=30)
                     
-                    # Create the game info dictionary
+                    # Don't add the game if essential information is missing
+                    if not opponent or opponent == "Unknown Opponent":
+                        logger.warning(f"Skipping game with missing opponent on {date_str}")
+                        continue
+
+                    if not location:
+                        logger.warning(f"Skipping game against {opponent} with missing location")
+                        continue
+
+                    # Add the date check as well
+                    if not date_str:
+                        logger.warning(f"Skipping game against {opponent} with missing date")
+                        continue
+
+                    # Now we can be sure we have the required data
+                    game_info = {
+                        'title': title,
+                        'start': game_datetime,
+                        'end': game_datetime + duration,
+                        'location': location,
+                        'broadcast': broadcast,
+                        'is_home': is_home,
+                        'opponent': opponent,
+                        'date_str': date_str,
+                        'time_str': time_str
+                    }
+
+                    games.append(game_info)
+                    logger.info(f"Added game: {title} on {game_datetime}")
+
+                    # Create game info
                     game_info = {
                         'title': title,
                         'start': game_datetime,
@@ -408,129 +528,162 @@ def scrape_schedule():
                     }
                     
                     games.append(game_info)
-                    logger.info(f"Scraped game: {title} on {game_datetime}")
-                    
+                    logger.info(f"Added game: {title} on {game_datetime}")
+                
                 except Exception as e:
-                    logger.error(f"Error parsing game item: {str(e)}")
+                    logger.error(f"Error processing game item: {str(e)}")
                     continue
         else:
             logger.error("No schedule items found on the page")
             
-            # Attempt to parse the page's entire text as a fallback
-            logger.info("Attempting to extract schedule from page text")
+            # Look for dates in the page text as a fallback
             page_text = soup.get_text()
             
-            # Save some of the page text for debugging
-            logger.info(f"Sample page text: {page_text[:500]}")
+            # Process known 2025 schedule from extracted data
+            logger.info("Attempting to create schedule from known 2025 games")
             
-            # Look for football schedule patterns
-            schedule_section = re.search(r'(?:Football Schedule|Schedule|FOOTBALL SCHEDULE).{0,200}(?:20\d\d|SEASON)', page_text, re.IGNORECASE)
-            if schedule_section:
-                section_start = max(0, schedule_section.start() - 100)
-                section_end = min(len(page_text), schedule_section.end() + 2000)
-                schedule_text = page_text[section_start:section_end]
-                
-                # Look for date patterns
-                date_matches = list(re.finditer(r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2},? \d{4}\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b', schedule_text))
-                
-                if date_matches:
-                    logger.info(f"Found {len(date_matches)} potential dates in text")
+            # Known 2025 Penn State football schedule
+            known_games = [
+                {"date": "Aug 30, 2025", "opponent": "Nevada", "is_home": True, "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium"},
+                {"date": "Sep 6, 2025", "opponent": "FIU", "is_home": True, "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium"},
+                {"date": "Sep 13, 2025", "opponent": "Villanova", "is_home": True, "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium"},
+                {"date": "Sep 27, 2025", "opponent": "Oregon", "is_home": True, "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium"},
+                {"date": "Oct 4, 2025", "opponent": "UCLA", "is_home": False, "location": "Los Angeles, Calif."},
+                {"date": "Oct 11, 2025", "opponent": "Northwestern", "is_home": True, "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium"},
+                {"date": "Oct 18, 2025", "opponent": "Iowa", "is_home": False, "location": "Iowa City, Iowa"},
+                {"date": "Nov 1, 2025", "opponent": "Ohio State", "is_home": False, "location": "Columbus, Ohio"},
+                {"date": "Nov 8, 2025", "opponent": "Indiana", "is_home": True, "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium"},
+                {"date": "Nov 15, 2025", "opponent": "Michigan State", "is_home": False, "location": "East Lansing, Mich."},
+                {"date": "Nov 22, 2025", "opponent": "Nebraska", "is_home": True, "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium"},
+                {"date": "Nov 29, 2025", "opponent": "Rutgers", "is_home": False, "location": "Piscataway, N.J."}
+            ]
+            
+            # Add special game - Blue-White Game
+            known_games.append({
+                "date": "Apr 26, 2025", 
+                "opponent": "Blue-White Game", 
+                "is_home": True, 
+                "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium"
+            })
+            
+            # Process the known games
+            for game in known_games:
+                try:
+                    date_str = game["date"]
+                    opponent = game["opponent"]
+                    is_home = game["is_home"]
+                    location = game.get("location", "")
+                    time_str = "TBA"  # All games initially set as TBA
+                    broadcast = "TBA"
                     
-                    for i, match in enumerate(date_matches):
-                        try:
-                            date_str = match.group(0)
-                            match_pos = match.start()
-                            
-                            # Look for time near this date
-                            time_match = re.search(r'\b\d{1,2}:\d{2}\s*[AP]M\b|\b\d{1,2}\s*[AP]M\b', schedule_text[match_pos:match_pos+100], re.IGNORECASE)
-                            time_str = time_match.group(0) if time_match else ""
-                            
-                            # Look for opponent info (100 chars before and after date)
-                            context = schedule_text[max(0, match_pos-100):min(len(schedule_text), match_pos+200)]
-                            
-                            # Try to find opponent patterns
-                            opponent_match = re.search(r'(?:vs\.?|versus)\s+([A-Za-z\s&\.\']+)(?:\s|$)|(?:at|@)\s+([A-Za-z\s&\.\']+)(?:\s|$)', context)
-                            opponent = opponent_match.group(1) if opponent_match and opponent_match.group(1) else opponent_match.group(2) if opponent_match else "Unknown Opponent"
-                            
-                            # Determine if home/away
-                            is_home = "vs" in context.lower() or "vs." in context.lower() or "home" in context.lower()
-                            
-                            # Look for location
-                            location_match = re.search(r'(?:at|in)\s+([A-Za-z\s\.,]+)(?:\s|$)', context)
-                            location = location_match.group(1) if location_match else ""
-                            
-                            # Look for broadcast info
-                            broadcast_match = re.search(r'(?:on|Live on|Watch on)\s+([A-Z0-9/&]+)|(?:ESPN|FOX|CBS|NBC|ABC|BTN|FS1)', context)
-                            broadcast = broadcast_match.group(1) if broadcast_match and len(broadcast_match.groups()) > 0 else broadcast_match.group(0) if broadcast_match else ""
-                            
-                            # Create title
-                            if is_home:
-                                title = f"{opponent} at Penn State"
-                            else:
-                                title = f"Penn State at {opponent}"
-                            
-                            # Get datetime
-                            game_datetime = parse_date_time(date_str, time_str)
-                            
-                            # Game duration
-                            duration = datetime.timedelta(hours=3, minutes=30)
-                            
-                            # Create game info
-                            game_info = {
-                                'title': title,
-                                'start': game_datetime,
-                                'end': game_datetime + duration,
-                                'location': location,
-                                'broadcast': broadcast,
-                                'is_home': is_home,
-                                'opponent': opponent,
-                                'date_str': date_str,
-                                'time_str': time_str
-                            }
-                            
-                            games.append(game_info)
-                            logger.info(f"Scraped game from text: {title} on {game_datetime}")
-                            
-                        except Exception as e:
-                            logger.error(f"Error parsing game from text: {str(e)}")
-                            continue
+                    # Create title
+                    if "Blue-White" in opponent:
+                        title = opponent  # Special case for Blue-White game
+                    elif is_home:
+                        title = f"{opponent} at Penn State"
+                    else:
+                        title = f"Penn State at {opponent}"
+                    
+                    # Parse date/time
+                    game_datetime = parse_date_time(date_str, time_str)
+                    
+                    # Game duration
+                    duration = datetime.timedelta(hours=3, minutes=30)
+                    
+                    # Create game info
+                    game_info = {
+                        'title': title,
+                        'start': game_datetime,
+                        'end': game_datetime + duration,
+                        'location': location,
+                        'broadcast': broadcast,
+                        'is_home': is_home,
+                        'opponent': opponent,
+                        'date_str': date_str,
+                        'time_str': time_str
+                    }
+                    
+                    games.append(game_info)
+                    logger.info(f"Added known game: {title} on {game_datetime}")
+                
+                except Exception as e:
+                    logger.error(f"Error processing known game: {str(e)}")
+                    continue
     
     except Exception as e:
         logger.error(f"Error scraping schedule: {str(e)}")
     
-    logger.info(f"Scraped {len(games)} games")
-    return games
+    deduplicated_games = []
+    seen_games = set()
+    
+    for game in games:
+        # Create a unique identifier based on date and opponent
+        game_id = f"{game['start'].date()}_{game['opponent']}"
+        
+        if game_id not in seen_games:
+            seen_games.add(game_id)
+            deduplicated_games.append(game)
+            logger.info(f"Keeping unique game: {game['title']} on {game['start'].date()}")
+        else:
+            logger.info(f"Skipping duplicate game: {game['title']} on {game['start'].date()}")
+    
+    logger.info(f"Deduplicated from {len(games)} to {len(deduplicated_games)} games")
+    return deduplicated_games
+    # Log final game count
+    #logger.info(f"Total games found: {len(games)}")
+    #return games
 
 def create_calendar(games):
     """Create an iCalendar file from the scraped games"""
     cal = Calendar()
+    valid_games = 0
+    skipped_games = 0
     
     for game in games:
-        event = Event()
-        event.name = game['title']
-        event.begin = game['start']
-        event.end = game['end']
-        event.location = game['location']
-        
-        # Add broadcast info to description
-        description = ""
-        if game['broadcast']:
-            description += f"Broadcast on: {game['broadcast']}\n"
-        
-        # Add home/away info
-        if game['is_home']:
-            description += "Home Game"
-        else:
-            description += "Away Game"
+        # Verify that we have all required data before creating an event
+        if (game['opponent'] and game['opponent'] != "Unknown Opponent" and
+            game['location'] and 
+            game['start']):
             
-        event.description = description
-        cal.events.add(event)
+            event = Event()
+            event.name = game['title']
+            event.begin = game['start']
+            event.end = game['end']
+            event.location = game['location']
+            
+            # Add broadcast info to description
+            description = ""
+            if game['broadcast']:
+                description += f"Broadcast on: {game['broadcast']}\n"
+            
+            # Add home/away info
+            if game['is_home']:
+                description += "Home Game"
+            else:
+                description += "Away Game"
+                
+            event.description = description
+            cal.events.add(event)
+            valid_games += 1
+            logger.info(f"Added event to calendar: {game['title']} on {game['start']}")
+        else:
+            # Log games that were skipped due to missing data
+            skipped_games += 1
+            missing = []
+            if not game['opponent'] or game['opponent'] == "Unknown Opponent":
+                missing.append("opponent")
+            if not game['location']:
+                missing.append("location")
+            if not game['start']:
+                missing.append("date/time")
+            
+            logger.warning(f"Skipped game due to missing {', '.join(missing)}: {game.get('title', 'Unknown')}")
     
-    # Save to file
+    # Save to file using the serialize() method instead of str()
     with open(CALENDAR_FILE, 'w') as f:
-        f.write(str(cal))
+        f.write(cal.serialize())
     
-    logger.info(f"Calendar created with {len(games)} events")
+    logger.info(f"Calendar created with {valid_games} events (skipped {skipped_games} incomplete entries)")
     return cal
 
 def update_calendar():
@@ -611,7 +764,7 @@ def index():
                 <p>This service is not affiliated with Penn State University.</p>
             </div>
         </body>
-    </html
+    </html>
     """
     
 @app.route('/debug')
