@@ -40,7 +40,7 @@ jobs:
           
           # Import required functions from the main script
           sys.path.append('.')
-          from Script import get_current_season, parse_date_time, create_calendar, scrape_schedule
+          from Script import parse_date_time, create_calendar, scrape_schedule
           
           # Configure basic logging
           logging.basicConfig(
