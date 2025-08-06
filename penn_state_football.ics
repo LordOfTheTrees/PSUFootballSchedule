@@ -2,28 +2,20 @@ BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:ics.py - http://git.io/lLljaA
 BEGIN:VEVENT
-DESCRIPTION:Away Game
-DTEND:20251018T163000Z
-LOCATION:Iowa City\, Iowa / Kinnick Stadium
-DTSTART:20251018T130000Z
-SUMMARY:Penn State at Iowa Iowa
-UID:d0e3c296-ef8b-4009-90b5-f807642eeef9@d0e3.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Away Game
-DTEND:20251004T163000Z
-LOCATION:Pasadena\, Calif. / The Rose Bowl
-DTSTART:20251004T130000Z
-SUMMARY:Penn State at UCLA
-UID:49464b72-3684-4edf-a05d-02725d94b2ab@4946.org
-END:VEVENT
-BEGIN:VEVENT
 DESCRIPTION:Home Game
-DTEND:20251011T163000Z
-LOCATION:Homecoming & Stripe OutUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
-DTSTART:20251011T130000Z
-SUMMARY:Northwestern Homecoming & Stripe Out University at Penn State
-UID:9b9078c6-8c2b-4188-a1c5-62bcae007099@9b90.org
+DTEND:20251122T163000Z
+LOCATION:Senior DayUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
+DTSTART:20251122T130000Z
+SUMMARY:Nebraska Senior Day University at Penn State
+UID:72a7176a-327c-4c6a-85d9-41fd70738bcd@72a7.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Away Game
+DTEND:20251129T163000Z
+LOCATION:Piscataway\, N.J. / SHI Stadium
+DTSTART:20251129T130000Z
+SUMMARY:Penn State at Rutgers
+UID:bddcec37-6f30-44c3-ae28-3343fbc18e88@bddc.org
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Home Game
@@ -31,71 +23,15 @@ DTEND:20250830T163000Z
 LOCATION:107K Family ReunionUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
 DTSTART:20250830T130000Z
 SUMMARY:Nevada at Penn State
-UID:ba10a27c-0207-413c-b5fa-ba982a60daff@ba10.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game
-DTEND:20251108T163000Z
-LOCATION:Helmet Stripe & Military AppreciationUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
-DTSTART:20251108T130000Z
-SUMMARY:Indiana Helmet Stripe & Military Appreciation University at Penn State
-UID:b3c351be-4e55-4cd9-a3b9-d4c24150bd65@b3c3.org
+UID:bbf8b66a-4379-4caa-970d-c4e8943e6efb@bbf8.org
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Away Game
-DTEND:20251101T163000Z
-LOCATION:Columbus\, Ohio / Ohio Stadium
-DTSTART:20251101T130000Z
-SUMMARY:Penn State at Ohio State
-UID:6284c702-990f-4fd7-8f30-14004abeaf8b@6284.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game
-DTEND:20251122T163000Z
-LOCATION:University Park\, Pa. / West Shore Home Field at Beaver Stadium
-DTSTART:20251122T130000Z
-SUMMARY:Nebraska University at Penn State
-UID:dafd60e1-d334-4e05-8270-97713be1c6aa@dafd.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game
-DTEND:20250830T163000Z
-LOCATION:University Park\, Pa. / West Shore Home Field at Beaver Stadium
-DTSTART:20250830T130000Z
-SUMMARY:Nevada University at Penn State
-UID:bae651cd-2ea3-4cbe-9851-c0e29e35e9d0@bae6.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Away Game
-DTEND:20251115T163000Z
-LOCATION:East Lansing\, Mich. / Spartan Stadium
-DTSTART:20251115T130000Z
-SUMMARY:Penn State at Michigan State East
-UID:9fb80e27-067a-474a-a9fa-9b49747cf7f2@9fb8.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game
-DTEND:20250927T163000Z
-LOCATION:Penn State White OutUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
-DTSTART:20250927T130000Z
-SUMMARY:Oregon Penn State White Out University at Penn State
-UID:0ae710ef-45e8-4e5d-abc7-6b31003ac90c@0ae7.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Away Game
-DTEND:20251129T163000Z
-LOCATION:Senior DayPiscataway\, N.J. / SHI Stadium
-DTSTART:20251129T130000Z
-SUMMARY:Penn State at Rutgers Senior Day
-UID:263e4f5d-15c5-434f-9779-dbb73fd21eb7@263e.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game
-DTEND:20250913T163000Z
-LOCATION:All-U DayUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
-DTSTART:20250913T130000Z
-SUMMARY:Villanova at Penn State
-UID:e47692e3-ab1c-4415-a7f9-a1abafdac79f@e476.org
+DTEND:20251018T163000Z
+LOCATION:Iowa City\, Iowa / Kinnick Stadium
+DTSTART:20251018T130000Z
+SUMMARY:Penn State at Iowa Iowa
+UID:8ef70e0a-bf3e-4744-8288-c7f148d779f3@8ef7.org
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Home Game
@@ -103,6 +39,70 @@ DTEND:20250906T163000Z
 LOCATION:THON GameUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
 DTSTART:20250906T130000Z
 SUMMARY:FIU THON Game University at Penn State
-UID:291aacbe-b971-4299-a153-10e360383b04@291a.org
+UID:c146de8b-4b3f-462d-8f50-8efcf4709fb8@c146.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game
+DTEND:20250830T163000Z
+LOCATION:University Park\, Pa. / West Shore Home Field at Beaver Stadium
+DTSTART:20250830T130000Z
+SUMMARY:Nevada University at Penn State
+UID:a3e6f9b6-7a86-4684-a3c2-ba6bdff44c77@a3e6.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Away Game
+DTEND:20251115T163000Z
+LOCATION:East Lansing\, Mich. / Spartan Stadium
+DTSTART:20251115T130000Z
+SUMMARY:Penn State at Michigan State East
+UID:3e8b5b1a-229a-4535-94bb-9ef77d9b1982@3e8b.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game
+DTEND:20251011T163000Z
+LOCATION:Homecoming & Stripe OutUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
+DTSTART:20251011T130000Z
+SUMMARY:Northwestern Homecoming & Stripe Out University at Penn State
+UID:6536779b-c564-47b7-8074-5211831befe0@6536.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Away Game
+DTEND:20251101T163000Z
+LOCATION:Columbus\, Ohio / Ohio Stadium
+DTSTART:20251101T130000Z
+SUMMARY:Penn State at Ohio State
+UID:2bed4788-ab19-4182-bed1-ce13cbf2486d@2bed.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Away Game
+DTEND:20251004T163000Z
+LOCATION:Pasadena\, Calif. / The Rose Bowl
+DTSTART:20251004T130000Z
+SUMMARY:Penn State at UCLA
+UID:3000b3c0-5f33-43f0-a272-ee3359691526@3000.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game
+DTEND:20251108T163000Z
+LOCATION:Helmet Stripe & Military AppreciationUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
+DTSTART:20251108T130000Z
+SUMMARY:Indiana Helmet Stripe & Military Appreciation University at Penn State
+UID:cf14c436-9504-4f4e-bdc7-d45a94ccc86e@cf14.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game
+DTEND:20250927T163000Z
+LOCATION:Penn State White OutUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
+DTSTART:20250927T130000Z
+SUMMARY:Oregon Penn State White Out University at Penn State
+UID:f815f55b-19d9-436a-9a7f-db295cdb2fc1@f815.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game
+DTEND:20250913T163000Z
+LOCATION:All-U DayUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
+DTSTART:20250913T130000Z
+SUMMARY:Villanova at Penn State
+UID:cef3e421-ea50-4b00-a605-53888df097d1@cef3.org
 END:VEVENT
 END:VCALENDAR
