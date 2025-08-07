@@ -3,67 +3,11 @@ VERSION:2.0
 PRODID:ics.py - http://git.io/lLljaA
 BEGIN:VEVENT
 DESCRIPTION:Home Game
-DTEND:20251122T163000Z
-LOCATION:Senior DayUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
-DTSTART:20251122T130000Z
-SUMMARY:Nebraska Senior Day University at Penn State
-UID:72a7176a-327c-4c6a-85d9-41fd70738bcd@72a7.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Away Game
-DTEND:20251129T163000Z
-LOCATION:Piscataway\, N.J. / SHI Stadium
-DTSTART:20251129T130000Z
-SUMMARY:Penn State at Rutgers
-UID:bddcec37-6f30-44c3-ae28-3343fbc18e88@bddc.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game
-DTEND:20250830T163000Z
-LOCATION:107K Family ReunionUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
-DTSTART:20250830T130000Z
-SUMMARY:Nevada at Penn State
-UID:bbf8b66a-4379-4caa-970d-c4e8943e6efb@bbf8.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Away Game
-DTEND:20251018T163000Z
-LOCATION:Iowa City\, Iowa / Kinnick Stadium
-DTSTART:20251018T130000Z
-SUMMARY:Penn State at Iowa Iowa
-UID:8ef70e0a-bf3e-4744-8288-c7f148d779f3@8ef7.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game
 DTEND:20250906T163000Z
 LOCATION:THON GameUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
 DTSTART:20250906T130000Z
 SUMMARY:FIU THON Game University at Penn State
-UID:c146de8b-4b3f-462d-8f50-8efcf4709fb8@c146.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game
-DTEND:20250830T163000Z
-LOCATION:University Park\, Pa. / West Shore Home Field at Beaver Stadium
-DTSTART:20250830T130000Z
-SUMMARY:Nevada University at Penn State
-UID:a3e6f9b6-7a86-4684-a3c2-ba6bdff44c77@a3e6.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Away Game
-DTEND:20251115T163000Z
-LOCATION:East Lansing\, Mich. / Spartan Stadium
-DTSTART:20251115T130000Z
-SUMMARY:Penn State at Michigan State East
-UID:3e8b5b1a-229a-4535-94bb-9ef77d9b1982@3e8b.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game
-DTEND:20251011T163000Z
-LOCATION:Homecoming & Stripe OutUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
-DTSTART:20251011T130000Z
-SUMMARY:Northwestern Homecoming & Stripe Out University at Penn State
-UID:6536779b-c564-47b7-8074-5211831befe0@6536.org
+UID:803a7cea-4822-4133-8439-c30c78bbcdef@803a.org
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Away Game
@@ -71,23 +15,23 @@ DTEND:20251101T163000Z
 LOCATION:Columbus\, Ohio / Ohio Stadium
 DTSTART:20251101T130000Z
 SUMMARY:Penn State at Ohio State
-UID:2bed4788-ab19-4182-bed1-ce13cbf2486d@2bed.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Away Game
-DTEND:20251004T163000Z
-LOCATION:Pasadena\, Calif. / The Rose Bowl
-DTSTART:20251004T130000Z
-SUMMARY:Penn State at UCLA
-UID:3000b3c0-5f33-43f0-a272-ee3359691526@3000.org
+UID:b9ae1a2c-3195-4044-9fc1-3d0816b929b9@b9ae.org
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Home Game
-DTEND:20251108T163000Z
-LOCATION:Helmet Stripe & Military AppreciationUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
-DTSTART:20251108T130000Z
-SUMMARY:Indiana Helmet Stripe & Military Appreciation University at Penn State
-UID:cf14c436-9504-4f4e-bdc7-d45a94ccc86e@cf14.org
+DTEND:20250830T163000Z
+LOCATION:University Park\, Pa. / West Shore Home Field at Beaver Stadium
+DTSTART:20250830T130000Z
+SUMMARY:Nevada University at Penn State
+UID:fbfd414d-60dc-4015-afbf-6dd20e59715c@fbfd.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game
+DTEND:20251011T163000Z
+LOCATION:Homecoming & Stripe OutUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
+DTSTART:20251011T130000Z
+SUMMARY:Northwestern Homecoming & Stripe Out University at Penn State
+UID:d3a06000-6ecb-4c9e-9088-1544e9df17c2@d3a0.org
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Home Game
@@ -95,7 +39,63 @@ DTEND:20250927T163000Z
 LOCATION:Penn State White OutUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
 DTSTART:20250927T130000Z
 SUMMARY:Oregon Penn State White Out University at Penn State
-UID:f815f55b-19d9-436a-9a7f-db295cdb2fc1@f815.org
+UID:01fa6dce-32e6-46d9-b696-2ace8695b99b@01fa.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Away Game
+DTEND:20251018T163000Z
+LOCATION:Iowa City\, Iowa / Kinnick Stadium
+DTSTART:20251018T130000Z
+SUMMARY:Penn State at Iowa Iowa
+UID:4e2cce58-d8e3-4124-bf2d-ebfb4a30fd47@4e2c.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Away Game
+DTEND:20251129T163000Z
+LOCATION:Piscataway\, N.J. / SHI Stadium
+DTSTART:20251129T130000Z
+SUMMARY:Penn State at Rutgers
+UID:0bfa7502-df14-414d-ac44-e77cd4c830e9@0bfa.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Away Game
+DTEND:20251115T163000Z
+LOCATION:East Lansing\, Mich. / Spartan Stadium
+DTSTART:20251115T130000Z
+SUMMARY:Penn State at Michigan State East
+UID:bce2563e-9c08-4f6d-9caf-20e8e1b703a7@bce2.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game
+DTEND:20251122T163000Z
+LOCATION:Senior DayUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
+DTSTART:20251122T130000Z
+SUMMARY:Nebraska Senior Day University at Penn State
+UID:f4e2c46e-2bb9-4416-81cc-7eb3ac5d60be@f4e2.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game
+DTEND:20251108T163000Z
+LOCATION:Helmet Stripe & Military AppreciationUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
+DTSTART:20251108T130000Z
+SUMMARY:Indiana Helmet Stripe & Military Appreciation University at Penn State
+UID:63a5f0d0-2087-4a72-b63f-3b0e7780baba@63a5.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game
+DTEND:20250830T163000Z
+LOCATION:107K Family ReunionUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
+DTSTART:20250830T130000Z
+SUMMARY:Nevada at Penn State
+UID:65ff643d-1f00-474d-ad15-9643941c32f2@65ff.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Away Game
+DTEND:20251004T163000Z
+LOCATION:Pasadena\, Calif. / The Rose Bowl
+DTSTART:20251004T130000Z
+SUMMARY:Penn State at UCLA
+UID:8af866d2-4008-4746-8c78-007ec1207e4b@8af8.org
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Home Game
@@ -103,6 +103,6 @@ DTEND:20250913T163000Z
 LOCATION:All-U DayUniversity Park\, Pa. / West Shore Home Field at Beaver Stadium
 DTSTART:20250913T130000Z
 SUMMARY:Villanova at Penn State
-UID:cef3e421-ea50-4b00-a605-53888df097d1@cef3.org
+UID:84edacb6-4044-4ed4-81eb-089e4d930094@84ed.org
 END:VEVENT
 END:VCALENDAR
