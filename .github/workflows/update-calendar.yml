@@ -31,7 +31,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 ics flask apscheduler
+          pip install requests beautifulsoup4 ics flask apscheduler pytz
           
       - name: Validate Script
         run: |
