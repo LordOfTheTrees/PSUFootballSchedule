@@ -9,7 +9,17 @@ from flask import Flask, Response
 import logging
 import re
 from apscheduler.schedulers.background import BackgroundScheduler
-import pytz
+
+# Try to import pytz, fall back to basic timezone handling if not available
+try:
+    import pytz
+    HAS_PYTZ = True
+    logger = logging.getLogger(__name__)
+    logger.info("✅ pytz available - using full timezone support")
+except ImportError:
+    HAS_PYTZ = False
+    logger = logging.getLogger(__name__)
+    logger.warning("⚠️ pytz not available - using basic timezone handling")
 
 # Configure logging
 logging.basicConfig(
@@ -42,16 +52,13 @@ def get_current_football_season_year():
         return current_year
     
 def parse_date_time(date_str, time_str):
-    """Parse date and time strings into datetime object with proper timezone handling"""
+    """Parse date and time strings into datetime object with timezone handling"""
     try:
         logger.info(f"Parsing date: '{date_str}', time: '{time_str}'")
         
         # Get the current football season year
         football_season_year = get_current_football_season_year()
         logger.info(f"Determined football season year: {football_season_year}")
-        
-        # Set up Eastern timezone
-        eastern = pytz.timezone('US/Eastern')
         
         # Clean up the input date string
         weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -69,7 +76,118 @@ def parse_date_time(date_str, time_str):
         date_str = cleaned_date_str
         
         # Extract year, month, day
-        year = None
+        year = def scrape_schedule():
+    """Scrape the Penn State football schedule with improved parsing"""
+    logger.info("🏈 Starting schedule scraping...")
+    games = []
+    
+    # ALWAYS load the known 2025 schedule first as our baseline
+    logger.info("📋 Loading known 2025 Penn State football schedule...")
+    
+    # Known 2025 Penn State football schedule with updated TV/time info
+    known_games = [
+        {
+            "date": "Aug 30, 2025", 
+            "opponent": "Nevada", 
+            "time": "3:30 PM", 
+            "broadcast": "CBS",
+            "is_home": True, 
+            "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
+            "special": "107K Family Reunion"
+        },
+        {
+            "date": "Sep 6, 2025", 
+            "opponent": "FIU", 
+            "time": "12:00 PM", 
+            "broadcast": "Big Ten Network",
+            "is_home": True, 
+            "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
+            "special": "THON Game"
+        },
+        {
+            "date": "Sep 13, 2025", 
+            "opponent": "Villanova", 
+            "time": "3:30 PM", 
+            "broadcast": "TBA",
+            "is_home": True, 
+            "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
+            "special": "All-U Day"
+        },
+        {
+            "date": "Sep 27, 2025", 
+            "opponent": "Oregon", 
+            "time": "7:30 PM", 
+            "broadcast": "NBC",
+            "is_home": True, 
+            "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
+            "special": "Penn State White Out"
+        },
+        {
+            "date": "Oct 4, 2025", 
+            "opponent": "UCLA", 
+            "time": "TBA", 
+            "broadcast": "TBA",
+            "is_home": False, 
+            "location": "Pasadena, Calif. / The Rose Bowl"
+        },
+        {
+            "date": "Oct 11, 2025", 
+            "opponent": "Northwestern", 
+            "time": "12:00 PM", 
+            "broadcast": "TBA",
+            "is_home": True, 
+            "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
+            "special": "Homecoming & Stripe Out"
+        },
+        {
+            "date": "Oct 18, 2025", 
+            "opponent": "Iowa", 
+            "time": "TBA", 
+            "broadcast": "TBA",
+            "is_home": False, 
+            "location": "Iowa City, Iowa / Kinnick Stadium"
+        },
+        {
+            "date": "Nov 1, 2025", 
+            "opponent": "Ohio State", 
+            "time": "TBA", 
+            "broadcast": "TBA",
+            "is_home": False, 
+            "location": "Columbus, Ohio / Ohio Stadium"
+        },
+        {
+            "date": "Nov 8, 2025", 
+            "opponent": "Indiana", 
+            "time": "TBA", 
+            "broadcast": "TBA",
+            "is_home": True, 
+            "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
+            "special": "Helmet Stripe & Military Appreciation"
+        },
+        {
+            "date": "Nov 15, 2025", 
+            "opponent": "Michigan State", 
+            "time": "TBA", 
+            "broadcast": "TBA",
+            "is_home": False, 
+            "location": "East Lansing, Mich. / Spartan Stadium"
+        },
+        {
+            "date": "Nov 22, 2025", 
+            "opponent": "Nebraska", 
+            "time": "TBA", 
+            "broadcast": "TBA",
+            "is_home": True, 
+            "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
+            "special": "Senior Day"
+        },
+        {
+            "date": "Nov 29, 2025", 
+            "opponent": "Rutgers", 
+            "time": "TBA", 
+            "broadcast": "TBA",
+            "is_home": False, 
+            "location": "P
         month = None
         day = None
         
@@ -127,10 +245,6 @@ def parse_date_time(date_str, time_str):
         
         # If we have month and day but no year, determine year based on football season
         if month is not None and day is not None and year is None:
-            # For college football schedule:
-            # August-December games are in the current football season year
-            # January games (bowl games) are in the next calendar year
-            # April games (spring games) are in the next calendar year
             current_date = datetime.datetime.now()
             
             if month >= 8:  # August-December (regular season)
@@ -152,7 +266,6 @@ def parse_date_time(date_str, time_str):
                 
                 # Handle multiple time options like "noon/3:30/4 p.m."
                 if "/" in time_str:
-                    # Take the first time option
                     time_str = time_str.split("/")[0].strip()
                 
                 # Handle "noon" specifically
@@ -184,15 +297,24 @@ def parse_date_time(date_str, time_str):
                             elif "AM" in time_str and hour == 12:
                                 hour = 0
             
-            # Create the datetime object in Eastern timezone first
+            # Create the datetime object with timezone handling
             try:
-                # Create naive datetime first
-                naive_datetime = datetime.datetime(year, month, day, hour, minute)
+                if HAS_PYTZ:
+                    # Full timezone support
+                    eastern = pytz.timezone('US/Eastern')
+                    naive_datetime = datetime.datetime(year, month, day, hour, minute)
+                    game_datetime = eastern.localize(naive_datetime)
+                    logger.info(f"Successfully parsed with pytz: {game_datetime} ({game_datetime.tzinfo})")
+                else:
+                    # Basic timezone handling - create UTC datetime assuming Eastern input
+                    # During DST (March-November): ET = UTC-4, during Standard (Nov-March): ET = UTC-5
+                    # For simplicity, assume DST for football season (Aug-Dec)
+                    utc_offset = 4 if month >= 3 and month <= 11 else 5
+                    naive_datetime = datetime.datetime(year, month, day, hour, minute)
+                    # Add the offset to convert ET to UTC
+                    game_datetime = naive_datetime + datetime.timedelta(hours=utc_offset)
+                    logger.info(f"Successfully parsed with basic timezone (+{utc_offset}h): {game_datetime}")
                 
-                # Localize to Eastern timezone (this handles DST automatically)
-                game_datetime = eastern.localize(naive_datetime)
-                
-                logger.info(f"Successfully parsed: {game_datetime} ({game_datetime.tzinfo})")
                 return game_datetime
             except ValueError as e:
                 logger.error(f"Invalid date components: year={year}, month={month}, day={day}, hour={hour}, minute={minute}")
@@ -302,7 +424,7 @@ def scrape_schedule():
                 {
                     "date": "Oct 11, 2025", 
                     "opponent": "Northwestern", 
-                    "time": "noon", 
+                    "time": "12:00 PM", 
                     "broadcast": "TBA",
                     "is_home": True, 
                     "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
@@ -370,8 +492,10 @@ def scrape_schedule():
                 "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium"
             })
             
+            logger.info(f"Processing {len(known_games)} known games...")
+            
             # Process known games
-            for game_data in known_games:
+            for i, game_data in enumerate(known_games):
                 try:
                     opponent = game_data["opponent"]
                     is_home = game_data["is_home"]
@@ -380,6 +504,8 @@ def scrape_schedule():
                     time_str = game_data["time"]
                     broadcast = game_data["broadcast"]
                     special = game_data.get("special", "")
+                    
+                    logger.info(f"Processing game {i+1}: {opponent} on {date_str} at {time_str}")
                     
                     # Create title
                     if "Blue-White" in opponent:
@@ -420,10 +546,41 @@ def scrape_schedule():
                     }
                     
                     games.append(game_info)
+                    logger.info(f"✅ Added game: {title} on {game_datetime} (Broadcast: {broadcast})")
+                
+                except Exception as e:
+                    logger.error(f"❌ Error processing known game {game_data.get('opponent', 'Unknown')}: {str(e)}")
+                    continue_date_time(date_str, time_str)
+                    if not game_datetime:
+                        logger.warning(f"Skipping game due to date parsing failure: {opponent}")
+                        continue
+                    
+                    # Game duration (3.5 hours)
+                    duration = datetime.timedelta(hours=3, minutes=30)
+                    
+                    # Enhance location with special event info
+                    enhanced_location = location
+                    if special and is_home:
+                        enhanced_location = f"{special} - {location}"
+                    
+                    game_info = {
+                        'title': title,
+                        'start': game_datetime,
+                        'end': game_datetime + duration,
+                        'location': enhanced_location,
+                        'broadcast': broadcast,
+                        'is_home': is_home,
+                        'opponent': opponent,
+                        'date_str': date_str,
+                        'time_str': time_str,
+                        'special': special
+                    }
+                    
+                    games.append(game_info)
                     logger.info(f"Added game: {title} on {game_datetime} (Broadcast: {broadcast})")
                 
                 except Exception as e:
-                    logger.error(f"Error processing known game {game_data.get('opponent', 'Unknown')}: {str(e)}")
+                    logger.error(f"❌ Error processing known game {game_data.get('opponent', 'Unknown')}: {str(e)}")
                     continue
         
         else:
@@ -435,7 +592,6 @@ def scrape_schedule():
     
     except requests.RequestException as e:
         logger.error(f"Error fetching schedule page: {str(e)}")
-        # Use known schedule as fallback
         logger.info("Using known schedule as fallback due to fetch error")
     
     except Exception as e:
@@ -446,14 +602,25 @@ def scrape_schedule():
     seen_games = set()
     
     for game in games:
-        game_id = f"{game['start'].date()}_{game['opponent']}"
-        if game_id not in seen_games:
-            seen_games.add(game_id)
-            deduplicated_games.append(game)
+        if game.get('start'):
+            game_id = f"{game['start'].date()}_{game['opponent']}"
+            if game_id not in seen_games:
+                seen_games.add(game_id)
+                deduplicated_games.append(game)
+            else:
+                logger.info(f"Skipping duplicate: {game['title']}")
         else:
-            logger.info(f"Skipping duplicate: {game['title']}")
+            logger.warning(f"Skipping game with no start time: {game.get('title', 'Unknown')}")
     
-    logger.info(f"Final game count: {len(deduplicated_games)}")
+    logger.info(f"🏈 Final game count: {len(deduplicated_games)}")
+    
+    # Log a sample of games for debugging
+    if deduplicated_games:
+        logger.info("📋 Sample games found:")
+        for i, game in enumerate(deduplicated_games[:3]):
+            start_str = game['start'].strftime('%Y-%m-%d %I:%M %p') if game.get('start') else 'No time'
+            logger.info(f"  {i+1}. {game['title']} - {start_str} (TV: {game.get('broadcast', 'N/A')})")
+    
     return deduplicated_games
 
 def create_calendar(games):
@@ -464,6 +631,8 @@ def create_calendar(games):
     valid_games = 0
     skipped_games = 0
     
+    logger.info(f"🗓️ Creating calendar with {len(games)} games...")
+    
     for game in games:
         if (game.get('opponent') and 
             game.get('location') and 
@@ -473,9 +642,8 @@ def create_calendar(games):
             event.name = game['title']
             
             # Set the start and end times
-            # The ics library will handle timezone conversion properly
-            event.begin = game['start']  # This should already be timezone-aware
-            event.end = game['end']      # This should already be timezone-aware
+            event.begin = game['start']
+            event.end = game['end']
             
             event.location = game['location']
             
@@ -503,21 +671,14 @@ def create_calendar(games):
                 description_parts.append("⏰ Game time to be announced")
             
             # Add timezone information for clarity
-            if game['start'].tzinfo:
-                tz_name = game['start'].strftime('%Z')
-                description_parts.append(f"🕒 Timezone: {tz_name}")
+            if hasattr(game['start'], 'tzinfo') and game['start'].tzinfo:
+                if HAS_PYTZ:
+                    tz_name = game['start'].strftime('%Z')
+                    description_parts.append(f"🕒 Timezone: {tz_name}")
+                else:
+                    description_parts.append(f"🕒 Times in Eastern Time")
             
             event.description = "\n".join(description_parts)
-            
-            # Add categories
-            categories = ["Football", "Penn State"]
-            if game.get('is_home'):
-                categories.append("Home Game")
-            else:
-                categories.append("Away Game")
-            
-            if game.get('special'):
-                categories.append("Special Event")
             
             # Set event properties
             event.transparent = False  # Show as busy
@@ -527,8 +688,14 @@ def create_calendar(games):
             valid_games += 1
             
             # Log with timezone info for debugging
-            start_time_str = game['start'].strftime('%Y-%m-%d %I:%M %p %Z') if game['start'].tzinfo else game['start'].strftime('%Y-%m-%d %I:%M %p')
-            logger.info(f"Added calendar event: {game['title']} at {start_time_str} ({game.get('broadcast', 'No broadcast info')})")
+            if hasattr(game['start'], 'strftime'):
+                start_time_str = game['start'].strftime('%Y-%m-%d %I:%M %p')
+                if hasattr(game['start'], 'tzinfo') and game['start'].tzinfo:
+                    start_time_str += f" {game['start'].strftime('%Z')}"
+            else:
+                start_time_str = str(game['start'])
+            
+            logger.info(f"✅ Added: {game['title']} at {start_time_str} ({game.get('broadcast', 'No TV')})")
         else:
             skipped_games += 1
             missing = []
@@ -539,7 +706,7 @@ def create_calendar(games):
             if not game.get('start'):
                 missing.append("start time")
             
-            logger.warning(f"Skipped incomplete game - missing: {', '.join(missing)}")
+            logger.warning(f"❌ Skipped incomplete game - missing: {', '.join(missing)}")
     
     # Save calendar
     try:
@@ -547,18 +714,27 @@ def create_calendar(games):
             calendar_content = cal.serialize()
             f.write(calendar_content)
             
-        logger.info(f"Calendar saved with {valid_games} events (skipped {skipped_games})")
+        logger.info(f"💾 Calendar saved: {valid_games} events, {skipped_games} skipped")
+        
+        # Log file size and sample content for debugging
+        file_size = os.path.getsize(CALENDAR_FILE) if os.path.exists(CALENDAR_FILE) else 0
+        logger.info(f"📊 Calendar file size: {file_size} bytes")
         
         # Log a sample of the calendar content for debugging
-        with open(CALENDAR_FILE, 'r', encoding='utf-8') as f:
-            content = f.read()
-            lines = content.split('\n')
-            dtstart_lines = [line for line in lines if line.startswith('DTSTART')]
-            if dtstart_lines:
-                logger.info(f"Sample DTSTART times in calendar: {dtstart_lines[:3]}")
+        if file_size > 0:
+            with open(CALENDAR_FILE, 'r', encoding='utf-8') as f:
+                content = f.read()
+                lines = content.split('\n')
+                dtstart_lines = [line for line in lines if line.startswith('DTSTART')]
+                summary_lines = [line for line in lines if line.startswith('SUMMARY')]
+                
+                if dtstart_lines:
+                    logger.info(f"🕒 Sample DTSTART times: {dtstart_lines[:2]}")
+                if summary_lines:
+                    logger.info(f"🏈 Sample events: {summary_lines[:2]}")
                 
     except Exception as e:
-        logger.error(f"Error saving calendar: {str(e)}")
+        logger.error(f"❌ Error saving calendar: {str(e)}")
         raise
     
     return cal
@@ -566,17 +742,21 @@ def create_calendar(games):
 def update_calendar():
     """Update the football calendar"""
     try:
-        logger.info("Starting calendar update...")
+        logger.info("🔄 Starting calendar update...")
         games = scrape_schedule()
         
         if not games:
-            logger.warning("No games found, skipping calendar update")
+            logger.error("❌ No games found, cannot create calendar")
             return
             
+        logger.info(f"✅ Found {len(games)} games, creating calendar...")
         create_calendar(games)
-        logger.info("Calendar updated successfully")
+        logger.info("🎉 Calendar updated successfully")
+        
     except Exception as e:
-        logger.error(f"Error updating calendar: {str(e)}")
+        logger.error(f"❌ Error updating calendar: {str(e)}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         raise
 
 @app.route('/calendar.ics')
