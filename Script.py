@@ -76,118 +76,7 @@ def parse_date_time(date_str, time_str):
         date_str = cleaned_date_str
         
         # Extract year, month, day
-        year = def scrape_schedule():
-    """Scrape the Penn State football schedule with improved parsing"""
-    logger.info("🏈 Starting schedule scraping...")
-    games = []
-    
-    # ALWAYS load the known 2025 schedule first as our baseline
-    logger.info("📋 Loading known 2025 Penn State football schedule...")
-    
-    # Known 2025 Penn State football schedule with updated TV/time info
-    known_games = [
-        {
-            "date": "Aug 30, 2025", 
-            "opponent": "Nevada", 
-            "time": "3:30 PM", 
-            "broadcast": "CBS",
-            "is_home": True, 
-            "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
-            "special": "107K Family Reunion"
-        },
-        {
-            "date": "Sep 6, 2025", 
-            "opponent": "FIU", 
-            "time": "12:00 PM", 
-            "broadcast": "Big Ten Network",
-            "is_home": True, 
-            "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
-            "special": "THON Game"
-        },
-        {
-            "date": "Sep 13, 2025", 
-            "opponent": "Villanova", 
-            "time": "3:30 PM", 
-            "broadcast": "TBA",
-            "is_home": True, 
-            "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
-            "special": "All-U Day"
-        },
-        {
-            "date": "Sep 27, 2025", 
-            "opponent": "Oregon", 
-            "time": "7:30 PM", 
-            "broadcast": "NBC",
-            "is_home": True, 
-            "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
-            "special": "Penn State White Out"
-        },
-        {
-            "date": "Oct 4, 2025", 
-            "opponent": "UCLA", 
-            "time": "TBA", 
-            "broadcast": "TBA",
-            "is_home": False, 
-            "location": "Pasadena, Calif. / The Rose Bowl"
-        },
-        {
-            "date": "Oct 11, 2025", 
-            "opponent": "Northwestern", 
-            "time": "12:00 PM", 
-            "broadcast": "TBA",
-            "is_home": True, 
-            "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
-            "special": "Homecoming & Stripe Out"
-        },
-        {
-            "date": "Oct 18, 2025", 
-            "opponent": "Iowa", 
-            "time": "TBA", 
-            "broadcast": "TBA",
-            "is_home": False, 
-            "location": "Iowa City, Iowa / Kinnick Stadium"
-        },
-        {
-            "date": "Nov 1, 2025", 
-            "opponent": "Ohio State", 
-            "time": "TBA", 
-            "broadcast": "TBA",
-            "is_home": False, 
-            "location": "Columbus, Ohio / Ohio Stadium"
-        },
-        {
-            "date": "Nov 8, 2025", 
-            "opponent": "Indiana", 
-            "time": "TBA", 
-            "broadcast": "TBA",
-            "is_home": True, 
-            "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
-            "special": "Helmet Stripe & Military Appreciation"
-        },
-        {
-            "date": "Nov 15, 2025", 
-            "opponent": "Michigan State", 
-            "time": "TBA", 
-            "broadcast": "TBA",
-            "is_home": False, 
-            "location": "East Lansing, Mich. / Spartan Stadium"
-        },
-        {
-            "date": "Nov 22, 2025", 
-            "opponent": "Nebraska", 
-            "time": "TBA", 
-            "broadcast": "TBA",
-            "is_home": True, 
-            "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
-            "special": "Senior Day"
-        },
-        {
-            "date": "Nov 29, 2025", 
-            "opponent": "Rutgers", 
-            "time": "TBA", 
-            "broadcast": "TBA",
-            "is_home": False, 
-            "location": "P
+        year = None
         month = None
         day = None
         
@@ -329,7 +218,7 @@ def parse_date_time(date_str, time_str):
 
 def scrape_schedule():
     """Scrape the Penn State football schedule with improved parsing"""
-    logger.info("Starting schedule scraping...")
+    logger.info("🏈 Starting schedule scraping...")
     games = []
     
     try:
@@ -344,258 +233,202 @@ def scrape_schedule():
         response = requests.get(BASE_URL, headers=headers, timeout=30)
         response.raise_for_status()
         
-        logger.info(f"Successfully fetched page. Status code: {response.status_code}")
+        logger.info(f"✅ Successfully fetched page. Status code: {response.status_code}")
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # New approach: Look for the schedule data in the HTML
-        # The page shows games in a structured format
+        # Get all text and split into lines for pattern matching
+        page_text = soup.get_text()
+        lines = [line.strip() for line in page_text.split('\n') if line.strip()]
         
-        # Try to find schedule events or game listings
-        schedule_items = []
+        logger.info(f"📄 Page contains {len(lines)} non-empty lines")
         
-        # Look for various container patterns
-        possible_containers = [
-            'div[class*="schedule"]',
-            'div[class*="event"]', 
-            'div[class*="game"]',
-            'table tr',
-            '.event-row',
-            '.game-row'
-        ]
-        
-        for selector in possible_containers:
-            items = soup.select(selector)
-            if items and len(items) > 3:  # Need multiple items for a schedule
-                logger.info(f"Found {len(items)} potential schedule items with selector: {selector}")
-                schedule_items = items
+        # Find the schedule section
+        schedule_start = -1
+        for i, line in enumerate(lines):
+            if 'Schedule Events' in line:
+                schedule_start = i + 1
+                logger.info(f"📋 Found schedule starting at line {schedule_start}")
                 break
         
-        # If no structured data found, use the known 2025 schedule with updated info
-        if not schedule_items or len(schedule_items) < 5:
-            logger.info("Using known 2025 schedule data with current broadcast info")
-            
-            # Known 2025 Penn State football schedule with updated TV/time info
-            known_games = [
-                {
-                    "date": "Aug 30, 2025", 
-                    "opponent": "Nevada", 
-                    "time": "3:30 PM", 
-                    "broadcast": "CBS",
-                    "is_home": True, 
-                    "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
-                    "special": "107K Family Reunion"
-                },
-                {
-                    "date": "Sep 6, 2025", 
-                    "opponent": "FIU", 
-                    "time": "12:00 PM", 
-                    "broadcast": "Big Ten Network",
-                    "is_home": True, 
-                    "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
-                    "special": "THON Game"
-                },
-                {
-                    "date": "Sep 13, 2025", 
-                    "opponent": "Villanova", 
-                    "time": "3:30 PM", 
-                    "broadcast": "TBA",
-                    "is_home": True, 
-                    "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
-                    "special": "All-U Day"
-                },
-                {
-                    "date": "Sep 27, 2025", 
-                    "opponent": "Oregon", 
-                    "time": "7:30 PM", 
-                    "broadcast": "NBC",
-                    "is_home": True, 
-                    "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
-                    "special": "Penn State White Out"
-                },
-                {
-                    "date": "Oct 4, 2025", 
-                    "opponent": "UCLA", 
-                    "time": "TBA", 
-                    "broadcast": "TBA",
-                    "is_home": False, 
-                    "location": "Pasadena, Calif. / The Rose Bowl"
-                },
-                {
-                    "date": "Oct 11, 2025", 
-                    "opponent": "Northwestern", 
-                    "time": "12:00 PM", 
-                    "broadcast": "TBA",
-                    "is_home": True, 
-                    "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
-                    "special": "Homecoming & Stripe Out"
-                },
-                {
-                    "date": "Oct 18, 2025", 
-                    "opponent": "Iowa", 
-                    "time": "TBA", 
-                    "broadcast": "TBA",
-                    "is_home": False, 
-                    "location": "Iowa City, Iowa / Kinnick Stadium"
-                },
-                {
-                    "date": "Nov 1, 2025", 
-                    "opponent": "Ohio State", 
-                    "time": "TBA", 
-                    "broadcast": "TBA",
-                    "is_home": False, 
-                    "location": "Columbus, Ohio / Ohio Stadium"
-                },
-                {
-                    "date": "Nov 8, 2025", 
-                    "opponent": "Indiana", 
-                    "time": "TBA", 
-                    "broadcast": "TBA",
-                    "is_home": True, 
-                    "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
-                    "special": "Helmet Stripe & Military Appreciation"
-                },
-                {
-                    "date": "Nov 15, 2025", 
-                    "opponent": "Michigan State", 
-                    "time": "TBA", 
-                    "broadcast": "TBA",
-                    "is_home": False, 
-                    "location": "East Lansing, Mich. / Spartan Stadium"
-                },
-                {
-                    "date": "Nov 22, 2025", 
-                    "opponent": "Nebraska", 
-                    "time": "TBA", 
-                    "broadcast": "TBA",
-                    "is_home": True, 
-                    "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium",
-                    "special": "Senior Day"
-                },
-                {
-                    "date": "Nov 29, 2025", 
-                    "opponent": "Rutgers", 
-                    "time": "TBA", 
-                    "broadcast": "TBA",
-                    "is_home": False, 
-                    "location": "Piscataway, N.J. / SHI Stadium"
-                }
-            ]
-            
-            # Add Blue-White Spring Game
-            known_games.append({
-                "date": "Apr 26, 2025", 
-                "opponent": "Blue-White Game", 
-                "time": "TBA", 
-                "broadcast": "TBA",
-                "is_home": True, 
-                "location": "University Park, Pa. / West Shore Home Field at Beaver Stadium"
-            })
-            
-            logger.info(f"Processing {len(known_games)} known games...")
-            
-            # Process known games
-            for i, game_data in enumerate(known_games):
-                try:
-                    opponent = game_data["opponent"]
-                    is_home = game_data["is_home"]
-                    location = game_data["location"]
-                    date_str = game_data["date"]
-                    time_str = game_data["time"]
-                    broadcast = game_data["broadcast"]
-                    special = game_data.get("special", "")
-                    
-                    logger.info(f"Processing game {i+1}: {opponent} on {date_str} at {time_str}")
-                    
-                    # Create title
-                    if "Blue-White" in opponent:
-                        title = opponent
-                    elif is_home:
-                        if special:
-                            title = f"{opponent} at Penn State - {special}"
-                        else:
-                            title = f"{opponent} at Penn State"
-                    else:
-                        title = f"Penn State at {opponent}"
-                    
-                    # Parse date/time
-                    game_datetime = parse_date_time(date_str, time_str)
-                    if not game_datetime:
-                        logger.warning(f"Skipping game due to date parsing failure: {opponent}")
-                        continue
-                    
-                    # Game duration (3.5 hours)
-                    duration = datetime.timedelta(hours=3, minutes=30)
-                    
-                    # Enhance location with special event info
-                    enhanced_location = location
-                    if special and is_home:
-                        enhanced_location = f"{special} - {location}"
-                    
-                    game_info = {
-                        'title': title,
-                        'start': game_datetime,
-                        'end': game_datetime + duration,
-                        'location': enhanced_location,
-                        'broadcast': broadcast,
-                        'is_home': is_home,
-                        'opponent': opponent,
-                        'date_str': date_str,
-                        'time_str': time_str,
-                        'special': special
-                    }
-                    
-                    games.append(game_info)
-                    logger.info(f"✅ Added game: {title} on {game_datetime} (Broadcast: {broadcast})")
-                
-                except Exception as e:
-                    logger.error(f"❌ Error processing known game {game_data.get('opponent', 'Unknown')}: {str(e)}")
-                    continue_date_time(date_str, time_str)
-                    if not game_datetime:
-                        logger.warning(f"Skipping game due to date parsing failure: {opponent}")
-                        continue
-                    
-                    # Game duration (3.5 hours)
-                    duration = datetime.timedelta(hours=3, minutes=30)
-                    
-                    # Enhance location with special event info
-                    enhanced_location = location
-                    if special and is_home:
-                        enhanced_location = f"{special} - {location}"
-                    
-                    game_info = {
-                        'title': title,
-                        'start': game_datetime,
-                        'end': game_datetime + duration,
-                        'location': enhanced_location,
-                        'broadcast': broadcast,
-                        'is_home': is_home,
-                        'opponent': opponent,
-                        'date_str': date_str,
-                        'time_str': time_str,
-                        'special': special
-                    }
-                    
-                    games.append(game_info)
-                    logger.info(f"Added game: {title} on {game_datetime} (Broadcast: {broadcast})")
-                
-                except Exception as e:
-                    logger.error(f"❌ Error processing known game {game_data.get('opponent', 'Unknown')}: {str(e)}")
-                    continue
+        if schedule_start == -1:
+            logger.warning("❌ Could not find 'Schedule Events' section")
+            return []
         
-        else:
-            # Process scraped items (if we found them)
-            logger.info(f"Processing {len(schedule_items)} scraped items")
-            # Add processing logic for scraped items here if needed
-            # For now, fall back to known schedule
-            pass
-    
+        # Parse games using the pattern: home/away -> vs./at -> opponent -> location -> time
+        current_game = {}
+        games_found = []
+        
+        i = schedule_start
+        while i < len(lines) and i < schedule_start + 200:  # Limit search to reasonable range
+            line = lines[i]
+            
+            # Step 1: Look for home/away indicator
+            if line in ['home', 'away']:
+                # Save previous game if complete
+                if len(current_game) >= 4:  # Has all required fields
+                    games_found.append(dict(current_game))
+                    logger.info(f"✅ Completed game: {current_game.get('opponent', 'Unknown')}")
+                
+                # Start new game
+                current_game = {'is_home': (line == 'home')}
+                logger.info(f"🏟️ Starting {line} game")
+                
+            # Step 2: Look for vs./at indicator
+            elif line in ['vs.', 'at']:
+                if 'is_home' in current_game:
+                    current_game['vs_at'] = line
+                    logger.info(f"  📍 {line}")
+            
+            # Step 3: Look for opponent (should come right after vs./at)
+            elif 'vs_at' in current_game and 'opponent' not in current_game:
+                # This should be the opponent name
+                if line and not line.startswith('University Park') and not 'Stadium' in line:
+                    current_game['opponent'] = line
+                    logger.info(f"  🏈 Opponent: {line}")
+            
+            # Step 4: Look for location
+            elif 'opponent' in current_game and 'location' not in current_game:
+                # Look for location indicators
+                location_indicators = ['University Park', 'Pa.', 'Calif.', 'Ohio', 'Iowa', 'Mich.', 'N.J.', 'Stadium', 'Bowl']
+                if any(indicator in line for indicator in location_indicators):
+                    current_game['location'] = line
+                    logger.info(f"  📍 Location: {line}")
+            
+            # Step 5: Look for time
+            elif 'location' in current_game and 'time' not in current_game:
+                # Look for time indicators
+                time_indicators = ['PM', 'AM', 'TBA', 'noon', ':']
+                if any(indicator in line for indicator in time_indicators) or line == 'TBA':
+                    current_game['time'] = line
+                    logger.info(f"  🕒 Time: {line}")
+                    
+                    # Game is now complete - will be saved at start of next game or end of loop
+            
+            i += 1
+        
+        # Don't forget the last game
+        if len(current_game) >= 4:
+            games_found.append(dict(current_game))
+            logger.info(f"✅ Completed final game: {current_game.get('opponent', 'Unknown')}")
+        
+        logger.info(f"🎯 Raw games found: {len(games_found)}")
+        
+        # Now convert the raw game data to our format
+        for game_data in games_found:
+            try:
+                opponent = game_data.get('opponent', '')
+                is_home = game_data.get('is_home', True)
+                location = game_data.get('location', '')
+                time_str = game_data.get('time', 'TBA')
+                
+                # Skip if missing essential data
+                if not opponent or not location:
+                    logger.warning(f"⚠️ Skipping incomplete game: opponent='{opponent}', location='{location}'")
+                    continue
+                
+                # Extract dates - for 2025 season, we need to map opponents to dates
+                # Since the website doesn't show dates in the scraped content, use known schedule
+                date_mapping = {
+                    'Nevada': 'Aug 30, 2025',
+                    'FIU': 'Sep 6, 2025', 
+                    'Villanova': 'Sep 13, 2025',
+                    'Oregon': 'Sep 27, 2025',
+                    'UCLA': 'Oct 4, 2025',
+                    'Northwestern': 'Oct 11, 2025',
+                    'Iowa': 'Oct 18, 2025',
+                    'Ohio State': 'Nov 1, 2025',
+                    'Indiana': 'Nov 8, 2025',
+                    'Michigan State': 'Nov 15, 2025',
+                    'Nebraska': 'Nov 22, 2025',
+                    'Rutgers': 'Nov 29, 2025'
+                }
+                
+                date_str = date_mapping.get(opponent, "Sep 1, 2025")  # Default fallback
+                
+                # Determine broadcast network based on confirmed info
+                broadcast_mapping = {
+                    'Nevada': 'CBS',
+                    'FIU': 'Big Ten Network',
+                    'Oregon': 'NBC',
+                    'Villanova': 'TBA',
+                    'UCLA': 'TBA',
+                    'Northwestern': 'TBA',
+                    'Iowa': 'TBA',
+                    'Ohio State': 'TBA',
+                    'Indiana': 'TBA',
+                    'Michigan State': 'TBA',
+                    'Nebraska': 'TBA',
+                    'Rutgers': 'TBA'
+                }
+                
+                broadcast = broadcast_mapping.get(opponent, 'TBA')
+                
+                # Determine special events
+                special_events = {
+                    'Nevada': '107K Family Reunion',
+                    'FIU': 'THON Game',
+                    'Villanova': 'All-U Day',
+                    'Oregon': 'Penn State White Out',
+                    'Northwestern': 'Homecoming & Stripe Out',
+                    'Indiana': 'Helmet Stripe & Military Appreciation',
+                    'Nebraska': 'Senior Day'
+                }
+                
+                special = special_events.get(opponent, '')
+                
+                # Create title
+                if is_home:
+                    if special:
+                        title = f"{opponent} at Penn State - {special}"
+                    else:
+                        title = f"{opponent} at Penn State"
+                else:
+                    title = f"Penn State at {opponent}"
+                
+                # Parse date/time
+                game_datetime = parse_date_time(date_str, time_str)
+                if not game_datetime:
+                    logger.warning(f"⚠️ Skipping game due to date parsing failure: {opponent}")
+                    continue
+                
+                # Game duration (3.5 hours)
+                duration = datetime.timedelta(hours=3, minutes=30)
+                
+                # Enhance location with special event info
+                enhanced_location = location
+                if special and is_home:
+                    enhanced_location = f"{special} - {location}"
+                
+                game_info = {
+                    'title': title,
+                    'start': game_datetime,
+                    'end': game_datetime + duration,
+                    'location': enhanced_location,
+                    'broadcast': broadcast,
+                    'is_home': is_home,
+                    'opponent': opponent,
+                    'date_str': date_str,
+                    'time_str': time_str,
+                    'special': special
+                }
+                
+                games.append(game_info)
+                logger.info(f"✅ Added game: {title} on {game_datetime} (Broadcast: {broadcast})")
+                
+            except Exception as e:
+                logger.error(f"❌ Error processing game {game_data}: {str(e)}")
+                continue
+        
     except requests.RequestException as e:
-        logger.error(f"Error fetching schedule page: {str(e)}")
-        logger.info("Using known schedule as fallback due to fetch error")
+        logger.error(f"❌ Error fetching schedule page: {str(e)}")
+        return []
     
     except Exception as e:
-        logger.error(f"Error scraping schedule: {str(e)}")
+        logger.error(f"❌ Error scraping schedule: {str(e)}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        return []
     
     # Remove duplicates
     deduplicated_games = []
@@ -608,9 +441,9 @@ def scrape_schedule():
                 seen_games.add(game_id)
                 deduplicated_games.append(game)
             else:
-                logger.info(f"Skipping duplicate: {game['title']}")
+                logger.info(f"🔄 Skipping duplicate: {game['title']}")
         else:
-            logger.warning(f"Skipping game with no start time: {game.get('title', 'Unknown')}")
+            logger.warning(f"⚠️ Skipping game with no start time: {game.get('title', 'Unknown')}")
     
     logger.info(f"🏈 Final game count: {len(deduplicated_games)}")
     
@@ -620,6 +453,8 @@ def scrape_schedule():
         for i, game in enumerate(deduplicated_games[:3]):
             start_str = game['start'].strftime('%Y-%m-%d %I:%M %p') if game.get('start') else 'No time'
             logger.info(f"  {i+1}. {game['title']} - {start_str} (TV: {game.get('broadcast', 'N/A')})")
+    else:
+        logger.error("❌ No valid games found after processing")
     
     return deduplicated_games
 
