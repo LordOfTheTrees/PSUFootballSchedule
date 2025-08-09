@@ -9,6 +9,7 @@ from flask import Flask, Response
 import logging
 import re
 from apscheduler.schedulers.background import BackgroundScheduler
+import pytz
 
 # Configure logging
 logging.basicConfig(
@@ -41,13 +42,16 @@ def get_current_football_season_year():
         return current_year
     
 def parse_date_time(date_str, time_str):
-    """Parse date and time strings into datetime object with improved year handling"""
+    """Parse date and time strings into datetime object with proper timezone handling"""
     try:
         logger.info(f"Parsing date: '{date_str}', time: '{time_str}'")
         
         # Get the current football season year
         football_season_year = get_current_football_season_year()
         logger.info(f"Determined football season year: {football_season_year}")
+        
+        # Set up Eastern timezone
+        eastern = pytz.timezone('US/Eastern')
         
         # Clean up the input date string
         weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -180,10 +184,15 @@ def parse_date_time(date_str, time_str):
                             elif "AM" in time_str and hour == 12:
                                 hour = 0
             
-            # Create the datetime object
+            # Create the datetime object in Eastern timezone first
             try:
-                game_datetime = datetime.datetime(year, month, day, hour, minute)
-                logger.info(f"Successfully parsed: {game_datetime}")
+                # Create naive datetime first
+                naive_datetime = datetime.datetime(year, month, day, hour, minute)
+                
+                # Localize to Eastern timezone (this handles DST automatically)
+                game_datetime = eastern.localize(naive_datetime)
+                
+                logger.info(f"Successfully parsed: {game_datetime} ({game_datetime.tzinfo})")
                 return game_datetime
             except ValueError as e:
                 logger.error(f"Invalid date components: year={year}, month={month}, day={day}, hour={hour}, minute={minute}")
@@ -448,7 +457,7 @@ def scrape_schedule():
     return deduplicated_games
 
 def create_calendar(games):
-    """Create an iCalendar file from the scraped games"""
+    """Create an iCalendar file from the scraped games with proper timezone handling"""
     cal = Calendar()
     cal.creator = "Penn State Football Schedule Scraper"
     
@@ -462,8 +471,12 @@ def create_calendar(games):
             
             event = Event()
             event.name = game['title']
-            event.begin = game['start']
-            event.end = game['end']
+            
+            # Set the start and end times
+            # The ics library will handle timezone conversion properly
+            event.begin = game['start']  # This should already be timezone-aware
+            event.end = game['end']      # This should already be timezone-aware
+            
             event.location = game['location']
             
             # Enhanced description with all available info
@@ -489,6 +502,11 @@ def create_calendar(games):
             if game.get('time_str') == "TBA":
                 description_parts.append("⏰ Game time to be announced")
             
+            # Add timezone information for clarity
+            if game['start'].tzinfo:
+                tz_name = game['start'].strftime('%Z')
+                description_parts.append(f"🕒 Timezone: {tz_name}")
+            
             event.description = "\n".join(description_parts)
             
             # Add categories
@@ -507,7 +525,10 @@ def create_calendar(games):
             
             cal.events.add(event)
             valid_games += 1
-            logger.info(f"Added calendar event: {game['title']} ({game.get('broadcast', 'No broadcast info')})")
+            
+            # Log with timezone info for debugging
+            start_time_str = game['start'].strftime('%Y-%m-%d %I:%M %p %Z') if game['start'].tzinfo else game['start'].strftime('%Y-%m-%d %I:%M %p')
+            logger.info(f"Added calendar event: {game['title']} at {start_time_str} ({game.get('broadcast', 'No broadcast info')})")
         else:
             skipped_games += 1
             missing = []
@@ -523,8 +544,19 @@ def create_calendar(games):
     # Save calendar
     try:
         with open(CALENDAR_FILE, 'w', encoding='utf-8') as f:
-            f.write(cal.serialize())
+            calendar_content = cal.serialize()
+            f.write(calendar_content)
+            
         logger.info(f"Calendar saved with {valid_games} events (skipped {skipped_games})")
+        
+        # Log a sample of the calendar content for debugging
+        with open(CALENDAR_FILE, 'r', encoding='utf-8') as f:
+            content = f.read()
+            lines = content.split('\n')
+            dtstart_lines = [line for line in lines if line.startswith('DTSTART')]
+            if dtstart_lines:
+                logger.info(f"Sample DTSTART times in calendar: {dtstart_lines[:3]}")
+                
     except Exception as e:
         logger.error(f"Error saving calendar: {str(e)}")
         raise
