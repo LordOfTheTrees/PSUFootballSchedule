@@ -2,14 +2,10 @@ name: Update Penn State Football Calendar
 
 on:
   schedule:
-    # Run at 3am ET (7am UTC) daily
-    - cron: '0 7 * * *'
+    # Run at 8am ET (12pm UTC) and 8pm ET (12am UTC) for better coverage
+    - cron: '0 12 * * *'
+    - cron: '0 0 * * *'
   workflow_dispatch:  # Allow manual trigger through GitHub UI
-  push:
-    branches: [ main ]
-    paths: 
-      - 'Script.py'
-      - '.github/workflows/update-calendar.yml'
 
 # Add permissions for writing to the repository
 permissions:
@@ -18,10 +14,12 @@ permissions:
 jobs:
   update-calendar:
     runs-on: ubuntu-latest
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0  # Fetch full history to avoid issues
         
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -31,238 +29,228 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 ics flask apscheduler pytz
+          pip install requests beautifulsoup4 ics flask apscheduler python-dateutil
           
-      - name: Validate Script
+      - name: Create update script
         run: |
-          python -c "
-          import Script
-          print('✅ Script imported successfully')
-          
-          # Test parse_date_time function
-          from Script import parse_date_time
-          
-          # Test various date formats
-          test_cases = [
-              ('Aug 30, 2025', '3:30 PM'),
-              ('Sep 6, 2025', '12:00 PM'),
-              ('Oct 11, 2025', 'noon'),
-              ('Nov 22, 2025', 'TBA')
-          ]
-          
-          for date_str, time_str in test_cases:
-              result = parse_date_time(date_str, time_str)
-              if result:
-                  print(f'✅ Parsed {date_str} {time_str} -> {result}')
-              else:
-                  print(f'❌ Failed to parse {date_str} {time_str}')
-          "
-          
-      - name: Test calendar generation
-        run: |
-          python -c "
-          import Script
-          import os
+          cat > update_calendar.py << 'EOF'
+          import requests
+          from bs4 import BeautifulSoup
+          import ics
+          from ics import Calendar, Event
           import datetime
-          
-          print('🏈 Testing Penn State Football Calendar Generation...')
-          
-          # Test the full scraping and calendar creation process
-          try:
-              games = Script.scrape_schedule()
-              print(f'📊 Found {len(games)} games')
-              
-              if len(games) > 0:
-                  for i, game in enumerate(games[:3]):  # Show first 3 games
-                      print(f'  {i+1}. {game[\"title\"]} - {game[\"start\"]} (TV: {game.get(\"broadcast\", \"N/A\")})')
-                  
-                  # Create calendar
-                  cal = Script.create_calendar(games)
-                  print(f'📅 Calendar created with {len(cal.events)} events')
-                  
-                  # Verify file was created
-                  if os.path.exists('penn_state_football.ics'):
-                      file_size = os.path.getsize('penn_state_football.ics')
-                      print(f'✅ Calendar file created ({file_size} bytes)')
-                      
-                      # Show first few lines of the file
-                      with open('penn_state_football.ics', 'r') as f:
-                          lines = f.readlines()[:10]
-                          print('📄 Calendar file preview:')
-                          for line in lines:
-                              print(f'    {line.strip()}')
-                  else:
-                      print('❌ Calendar file not created')
-                      exit(1)
-              else:
-                  print('⚠️  No games found - this might be expected during off-season')
-                  # Create a minimal calendar for testing
-                  from ics import Calendar, Event
-                  cal = Calendar()
-                  event = Event()
-                  event.name = 'Test Event'
-                  event.begin = datetime.datetime.now()
-                  cal.events.add(event)
-                  
-                  with open('penn_state_football.ics', 'w') as f:
-                      f.write(cal.serialize())
-                  print('✅ Created test calendar file')
-                  
-          except Exception as e:
-              print(f'❌ Error during testing: {str(e)}')
-              import traceback
-              traceback.print_exc()
-              exit(1)
-          
-          print('✅ All tests passed!')
-          "
-          
-      - name: Run calendar update
-        run: |
-          echo "🔄 Running calendar update..."
-          python -c "
-          import Script
-          import sys
           import logging
+          import sys
+          import os
+          import re
           
-          # Configure logging for GitHub Actions
-          logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-          logger = logging.getLogger()
+          # Import required functions from the main script
+          sys.path.append('.')
+          try:
+              from Script import (get_current_season, parse_date_time, create_calendar, 
+                                scrape_schedule, validate_schedule, EXPECTED_GAMES_PER_SEASON, MIN_GAMES_THRESHOLD)
+          except ImportError as e:
+              print(f"Import error: {e}")
+              print("Cannot proceed without main script functions")
+              sys.exit(1)
+          
+          # Configure basic logging
+          logging.basicConfig(
+              level=logging.INFO,
+              format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+          )
+          logger = logging.getLogger("calendar_updater")
+          
+          # Run the update process
+          logger.info("Starting calendar update...")
           
           try:
-              logger.info('Starting calendar update process...')
-              Script.update_calendar()
-              logger.info('✅ Calendar update completed successfully')
-          except Exception as e:
-              logger.error(f'❌ Calendar update failed: {str(e)}')
-              sys.exit(1)
-          "
-          
-      - name: Validate generated calendar
-        run: |
-          python -c "
-          import os
-          import datetime
-          
-          # Check if calendar file exists and has content
-          if not os.path.exists('penn_state_football.ics'):
-              print('❌ Calendar file not found')
-              exit(1)
-          
-          file_size = os.path.getsize('penn_state_football.ics')
-          if file_size < 100:
-              print(f'❌ Calendar file too small ({file_size} bytes)')
-              exit(1)
-          
-          # Validate basic calendar structure
-          with open('penn_state_football.ics', 'r') as f:
-              content = f.read()
+              # Get current season and update the calendar
+              current_season = get_current_season()
+              logger.info(f"Updating calendar for season {current_season}")
               
-          required_elements = ['BEGIN:VCALENDAR', 'END:VCALENDAR', 'BEGIN:VEVENT', 'END:VEVENT']
-          for element in required_elements:
-              if element not in content:
-                  print(f'❌ Missing required calendar element: {element}')
-                  exit(1)
+              # Scrape the schedule (tries Penn State first, then ESPN - no fallback)
+              games = scrape_schedule(current_season)
+              
+              if not games:
+                  logger.error("No games found from any source - scraping failed")
+                  print("ERROR: Schedule scraping failed - no games found")
+                  print("This indicates the scraping logic needs to be updated")
+                  sys.exit(1)
+              
+              # Validate schedule quality
+              expected_count = EXPECTED_GAMES_PER_SEASON.get(current_season, MIN_GAMES_THRESHOLD)
+              if len(games) < expected_count:
+                  logger.error(f"Insufficient games found: {len(games)} < {expected_count}")
+                  print(f"ERROR: Only found {len(games)} games, expected at least {expected_count}")
+                  print("This indicates incomplete scraping - parser may need updates")
+                  sys.exit(1)
+              
+              # Additional validation
+              if not validate_schedule(games, current_season):
+                  logger.error("Schedule failed validation checks")
+                  print("ERROR: Schedule validation failed")
+                  print("Games found but they appear to have parsing errors")
+                  sys.exit(1)
+              
+              # Create the calendar
+              cal = create_calendar(games)
+              
+              logger.info(f"Calendar updated successfully with {len(games)} games")
+              
+              # Print summary for GitHub Actions log
+              print(f"\\n=== CALENDAR UPDATE SUCCESS ===")
+              print(f"Season: {current_season}")
+              print(f"Games found: {len(games)}")
+              print("Games:")
+              for game in games:
+                  print(f"  - {game['title']} ({game['start'].strftime('%m/%d/%Y %I:%M %p')})")
+              print("================================\\n")
+              
+              # Verify the calendar file was created and has content
+              if os.path.exists("penn_state_football.ics"):
+                  with open("penn_state_football.ics", 'r') as f:
+                      content = f.read()
+                      if len(content) > 100:  # Basic sanity check
+                          event_count = content.count("BEGIN:VEVENT")
+                          if event_count >= expected_count:
+                              print(f"Calendar file created successfully with {event_count} events")
+                              sys.exit(0)
+                          else:
+                              print(f"Calendar has only {event_count} events, expected {expected_count}")
+                              sys.exit(1)
+                      else:
+                          print("Calendar file too small, may be corrupted")
+                          sys.exit(1)
+              else:
+                  print("Calendar file was not created")
+                  sys.exit(1)
+              
+          except Exception as e:
+              logger.error(f"Error updating calendar: {str(e)}")
+              print(f"ERROR: {str(e)}")
+              sys.exit(1)
+          EOF
           
-          # Count events
-          event_count = content.count('BEGIN:VEVENT')
-          print(f'✅ Calendar validation passed')
-          print(f'📊 File size: {file_size} bytes')
-          print(f'🎯 Events: {event_count}')
-          print(f'🕒 Generated: {datetime.datetime.now().strftime(\"%Y-%m-%d %H:%M:%S UTC\")}')
-          "
+      - name: Run update script
+        run: python update_calendar.py
+        
+      - name: Verify calendar file
+        run: |
+          if [ ! -f "penn_state_football.ics" ]; then
+            echo "ERROR: Calendar file not found"
+            exit 1
+          fi
           
+          # Check file size
+          filesize=$(wc -c < penn_state_football.ics)
+          if [ $filesize -lt 100 ]; then
+            echo "ERROR: Calendar file too small ($filesize bytes)"
+            exit 1
+          fi
+          
+          # Check for basic iCal structure
+          if ! grep -q "BEGIN:VCALENDAR" penn_state_football.ics; then
+            echo "ERROR: Invalid iCal format"
+            exit 1
+          fi
+          
+          # Count events and validate
+          event_count=$(grep -c "BEGIN:VEVENT" penn_state_football.ics)
+          echo "Calendar contains $event_count events"
+          
+          # Check if we have reasonable number of events for the current season
+          current_year=$(date +%Y)
+          current_month=$(date +%m)
+          
+          # Determine expected season
+          if [ $current_month -gt 2 ]; then
+            season=$current_year
+          else
+            season=$((current_year - 1))
+          fi
+          
+          # Expected games (Penn State typically plays 12 games)
+          expected_games=12
+          min_games=10
+          
+          if [ $event_count -lt $min_games ]; then
+            echo "ERROR: Calendar has only $event_count events, expected at least $min_games"
+            echo "This indicates scraping failure - the parser needs to be fixed"
+            exit 1
+          elif [ $event_count -lt $expected_games ]; then
+            echo "WARNING: Calendar has only $event_count events, expected $expected_games"
+            echo "This may indicate incomplete scraping"
+          fi
+          
+          echo "Calendar file validation passed"
+        
       - name: Check for calendar changes
         id: calendar-changes
         run: |
-          # Check if there are any changes to the calendar file
           if git diff --quiet penn_state_football.ics; then
             echo "changes=false" >> $GITHUB_OUTPUT
-            echo "📄 No changes detected in calendar file"
+            echo "No changes to the calendar file"
           else
             echo "changes=true" >> $GITHUB_OUTPUT
-            echo "📝 Changes detected in calendar file"
-            echo "Git diff summary:"
-            git diff --stat penn_state_football.ics || true
+            echo "Calendar file has been updated"
           fi
-          
-      - name: Show calendar summary
-        if: steps.calendar-changes.outputs.changes == 'true'
-        run: |
-          echo "📋 Calendar Update Summary:"
-          echo "=========================="
-          python -c "
-          import os
-          from datetime import datetime
-          
-          if os.path.exists('penn_state_football.ics'):
-              with open('penn_state_football.ics', 'r') as f:
-                  content = f.read()
-              
-              events = content.count('BEGIN:VEVENT')
-              size = len(content)
-              
-              print(f'📅 Total Events: {events}')
-              print(f'📏 File Size: {size:,} characters')
-              print(f'🕒 Update Time: {datetime.now().strftime(\"%Y-%m-%d %H:%M:%S UTC\")}')
-              
-              # Extract and show a few game titles for verification
-              lines = content.split('\n')
-              summaries = [line for line in lines if line.startswith('SUMMARY:')]
-              
-              if summaries:
-                  print(f'🏈 Sample Games:')
-                  for i, summary in enumerate(summaries[:5]):  # Show first 5
-                      game_title = summary.replace('SUMMARY:', '').strip()
-                      print(f'  {i+1}. {game_title}')
-                  
-                  if len(summaries) > 5:
-                      print(f'  ... and {len(summaries) - 5} more games')
-          "
-          
+        
       - name: Commit and push changes
         if: steps.calendar-changes.outputs.changes == 'true'
         run: |
-          # Configure git
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          
-          # Add and commit the calendar file
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
           git add penn_state_football.ics
-          
-          # Create a detailed commit message
-          commit_message="🏈 Update Penn State football calendar [automated]
-
-          Updated: $(date '+%Y-%m-%d %H:%M:%S UTC')
-          Events: $(grep -c 'BEGIN:VEVENT' penn_state_football.ics || echo 'unknown')
-          
-          This update includes:
-          - Latest game times and dates
-          - TV broadcast information when available
-          - Special event details (White Out, Homecoming, etc.)
-          - Updated location information
-          
-          Data source: https://gopsusports.com/sports/football/schedule"
-          
-          git commit -m "$commit_message"
-          
-          # Push changes
-          git push origin HEAD:${{ github.ref_name }}
-          
-          echo "✅ Calendar successfully updated and pushed to repository"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
-      - name: Update summary
-        if: always()
+          git commit -m "Update Penn State football calendar - $(date '+%Y-%m-%d %H:%M:%S UTC')"
+          git push
+        
+      - name: Display calendar info
         run: |
-          echo "🏈 Penn State Football Calendar Update Complete"
-          echo "=============================================="
-          echo "📊 Workflow Status: ${{ job.status }}"
-          echo "🔄 Changes Made: ${{ steps.calendar-changes.outputs.changes }}"
-          echo "🕒 Completed: $(date '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "### Penn State Football Calendar Update Complete"
+          echo "**File:** penn_state_football.ics"
+          echo "**Events:** $(grep -c "BEGIN:VEVENT" penn_state_football.ics || echo "0")"
+          echo "**Last Updated:** $(date)"
           echo ""
-          echo "📱 Calendar URL: https://raw.githubusercontent.com/${{ github.repository }}/main/penn_state_football.ics"
-          echo "🌐 Project URL: https://github.com/${{ github.repository }}"
+          echo "**Recent games:**"
+          # Extract and display first few events for verification
+          python3 -c "
+          import re
+          with open('penn_state_football.ics', 'r') as f:
+              content = f.read()
+          
+          # Find all SUMMARY lines (game titles)
+          summaries = re.findall(r'SUMMARY:(.+)', content)
+          dtstart = re.findall(r'DTSTART:(\d{8}T\d{6})', content)
+          
+          print('**Upcoming games:**')
+          for i, (summary, dt) in enumerate(zip(summaries[:5], dtstart[:5])):
+              # Parse date
+              year, month, day = dt[:4], dt[4:6], dt[6:8]
+              hour, minute = dt[9:11], dt[11:13]
+              print(f'- {summary} ({month}/{day}/{year} {hour}:{minute})')
+          "
+          
+      - name: Calendar URL info
+        run: |
           echo ""
-          echo "Next automatic update: Tomorrow at 3:00 AM ET"
+          echo "### Calendar Access Information"
+          echo "**Direct URL:** https://raw.githubusercontent.com/${{ github.repository }}/main/penn_state_football.ics"
+          echo "**Subscribe URL:** Same as above - use this URL in your calendar app"
+          echo ""
+          echo "### How to Use"
+          echo "1. Copy the URL above"
+          echo "2. In your calendar app (Google Calendar, Outlook, Apple Calendar, etc.):"
+          echo "   - Look for 'Add Calendar' or 'Subscribe to Calendar'"
+          echo "   - Paste the URL"
+          echo "   - The calendar will automatically update when changes are made"
+          echo ""
+          echo "### Repository"
+          echo "Source code: https://github.com/${{ github.repository }}"
+          
+      - name: Upload calendar as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: penn-state-football-calendar
+          path: penn_state_football.ics
+          retention-days: 30
