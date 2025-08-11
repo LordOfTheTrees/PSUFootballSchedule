@@ -5,753 +5,697 @@ from ics import Calendar, Event
 import datetime
 import time
 import os
-from flask import Flask, Response
-import logging
 import re
+from flask import Flask, Response, request
+import logging
+import json
 from apscheduler.schedulers.background import BackgroundScheduler
-
-# Try to import pytz, fall back to basic timezone handling if not available
-try:
-    import pytz
-    HAS_PYTZ = True
-    logger = logging.getLogger(__name__)
-    logger.info("✅ pytz available - using full timezone support")
-except ImportError:
-    HAS_PYTZ = False
-    logger = logging.getLogger(__name__)
-    logger.warning("⚠️ pytz not available - using basic timezone handling")
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.FileHandler("football_scraper.log"), logging.StreamHandler()]
+    handlers=[logging.FileHandler("penn_state_football_scraper.log"), logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
 
 # Initialize Flask app
 app = Flask(__name__)
 
-# Base URL for Penn State football
-BASE_URL = "https://gopsusports.com/sports/football/schedule"
 CALENDAR_FILE = "penn_state_football.ics"
 
-def get_current_football_season_year():
-    """Determine the current football season year"""
+# Expected number of games per season for validation
+EXPECTED_GAMES_PER_SEASON = {
+    2025: 12,  # Penn State typically plays 12 games (12 regular season + potential bowl)
+    2024: 12,
+    2023: 12,
+    # Add more years as needed
+}
+
+# Minimum acceptable number of games (fallback for unknown years)
+MIN_GAMES_THRESHOLD = 10
+
+def get_current_season():
+    """Get the current football season based on the current date"""
     today = datetime.datetime.now()
-    current_year = today.year
-    current_month = today.month
-    
-    # Football season typically runs from August to January
-    # If we're in January-July, we might be looking at next season's schedule
-    if current_month >= 8:  # August-December
-        return current_year
-    elif current_month <= 1:  # January (bowl games)
-        return current_year - 1
-    else:  # February-July (offseason, preparing for next season)
-        return current_year
-    
-def parse_date_time(date_str, time_str):
-    """Parse date and time strings into datetime object with timezone handling"""
+    if today.month > 2:
+        return today.year
+    else:
+        return today.year - 1
+
+def get_sidearm_headers():
+    """Headers optimized for SIDEARM Sports platform"""
+    return {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Cache-Control': 'max-age=0',
+        'Referer': 'https://www.google.com/',
+    }
+
+def parse_date_time(date_str, time_str=None, year=None):
+    """Improved date/time parsing with better fallbacks"""
     try:
-        logger.info(f"Parsing date: '{date_str}', time: '{time_str}'")
+        if year is None:
+            year = get_current_season()
+            
+        # Clean inputs
+        date_str = date_str.strip() if date_str else ""
+        time_str = time_str.strip() if time_str else "12:00 PM"  # Default to noon for college football
         
-        # Get the current football season year
-        football_season_year = get_current_football_season_year()
-        logger.info(f"Determined football season year: {football_season_year}")
+        logger.debug(f"Parsing date: '{date_str}', time: '{time_str}', year: {year}")
         
-        # Clean up the input date string
-        weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-        cleaned_date_str = date_str
+        # Handle various date formats
+        month, day = None, None
         
-        # Fix cases like "SaturdayNov 22" where day of week and month are joined
-        for day in weekdays:
-            if day.lower() in date_str.lower():
-                day_pos = date_str.lower().find(day.lower()) + len(day)
-                if day_pos < len(date_str) and date_str[day_pos:day_pos+1] != ' ':
-                    cleaned_date_str = date_str[:day_pos] + ' ' + date_str[day_pos:]
-                    logger.info(f"Fixed joined weekday-month: '{date_str}' -> '{cleaned_date_str}'")
-                    break
-        
-        date_str = cleaned_date_str
-        
-        # Extract year, month, day
-        year = None
-        month = None
-        day = None
-        
-        # Try various date formats
-        # Format 1: MM/DD/YYYY or MM/DD
         if "/" in date_str:
-            parts = [p.strip() for p in date_str.split("/")]
-            try:
+            # Format: MM/DD or MM/DD/YY
+            parts = date_str.split("/")
+            if len(parts) >= 2:
                 month = int(parts[0])
                 day = int(parts[1])
-                if len(parts) > 2 and parts[2]:
-                    year = int(parts[2])
-                    if year < 100:
-                        year += 2000
-                logger.info(f"Parsed MM/DD format: month={month}, day={day}, year={year}")
-            except (ValueError, IndexError):
-                logger.warning(f"Failed to parse MM/DD format: {date_str}")
-        
-        # Format 2: Month + Day pattern
-        if month is None:
-            month_map = {
-                'january': 1, 'jan': 1,
-                'february': 2, 'feb': 2,
-                'march': 3, 'mar': 3,
-                'april': 4, 'apr': 4,
-                'may': 5,
-                'june': 6, 'jun': 6,
-                'july': 7, 'jul': 7,
-                'august': 8, 'aug': 8,
-                'september': 9, 'sep': 9, 'sept': 9,
-                'october': 10, 'oct': 10,
-                'november': 11, 'nov': 11,
-                'december': 12, 'dec': 12
-            }
-            
-            # Find month name in string
-            for month_name, month_num in month_map.items():
-                if month_name.lower() in date_str.lower():
-                    month = month_num
-                    logger.info(f"Found month '{month_name}' -> {month}")
-                    
-                    # Find day number
-                    day_match = re.search(r'\b(\d{1,2})\b', date_str)
-                    if day_match:
-                        day = int(day_match.group(1))
-                        logger.info(f"Found day: {day}")
-                    
-                    # Look for year in the string
-                    year_match = re.search(r'\b(20\d{2})\b', date_str)
-                    if year_match:
-                        year = int(year_match.group(1))
-                        logger.info(f"Found year: {year}")
-                    
-                    break
-        
-        # If we have month and day but no year, determine year based on football season
-        if month is not None and day is not None and year is None:
-            current_date = datetime.datetime.now()
-            
-            if month >= 8:  # August-December (regular season)
-                year = football_season_year
-            elif month <= 4:  # January-April (bowls/spring game)
-                year = football_season_year + 1
-            else:  # May-July (unusual, use next year)
-                year = football_season_year + 1
-            
-            logger.info(f"Determined year {year} based on month {month} and current date {current_date}")
-        
-        if month is not None and day is not None and year is not None:
-            # Parse time
-            hour, minute = 13, 0  # Default to 1 PM ET
-            
-            if time_str and time_str.lower() not in ["tba", "tbd", ""]:
-                # Clean time string
-                time_str = time_str.strip().upper()
-                
-                # Handle multiple time options like "noon/3:30/4 p.m."
-                if "/" in time_str:
-                    time_str = time_str.split("/")[0].strip()
-                
-                # Handle "noon" specifically
-                if "NOON" in time_str:
-                    hour, minute = 12, 0
-                else:
-                    # Extract time with AM/PM
-                    time_match = re.search(r'(\d+):?(\d*)\s*([AP]M)', time_str)
-                    if time_match:
-                        hour = int(time_match.group(1))
-                        minute_str = time_match.group(2)
-                        minute = int(minute_str) if minute_str else 0
-                        am_pm = time_match.group(3)
-                        
-                        # Adjust for PM
-                        if am_pm == "PM" and hour < 12:
-                            hour += 12
-                        # Adjust for 12 AM
-                        elif am_pm == "AM" and hour == 12:
-                            hour = 0
+                if len(parts) >= 3 and len(parts[2]) >= 2:
+                    year_part = int(parts[2])
+                    if year_part > 50:
+                        year = 1900 + year_part
                     else:
-                        # Try to extract just the hour
-                        hour_match = re.search(r'(\d+)\s*[AP]M', time_str)
-                        if hour_match:
-                            hour = int(hour_match.group(1))
-                            minute = 0
-                            if "PM" in time_str and hour < 12:
-                                hour += 12
-                            elif "AM" in time_str and hour == 12:
-                                hour = 0
-            
-            # Create the datetime object with timezone handling
+                        year = 2000 + year_part
+        elif re.match(r'\w+\s+\d+', date_str):
+            # Handle "Sep 20", "September 20" format
             try:
-                if HAS_PYTZ:
-                    # Full timezone support
-                    eastern = pytz.timezone('US/Eastern')
-                    naive_datetime = datetime.datetime(year, month, day, hour, minute)
-                    game_datetime = eastern.localize(naive_datetime)
-                    logger.info(f"Successfully parsed with pytz: {game_datetime} ({game_datetime.tzinfo})")
-                else:
-                    # Basic timezone handling - create UTC datetime assuming Eastern input
-                    # During DST (March-November): ET = UTC-4, during Standard (Nov-March): ET = UTC-5
-                    # For simplicity, assume DST for football season (Aug-Dec)
-                    utc_offset = 4 if month >= 3 and month <= 11 else 5
-                    naive_datetime = datetime.datetime(year, month, day, hour, minute)
-                    # Add the offset to convert ET to UTC
-                    game_datetime = naive_datetime + datetime.timedelta(hours=utc_offset)
-                    logger.info(f"Successfully parsed with basic timezone (+{utc_offset}h): {game_datetime}")
+                from dateutil import parser
+                parsed = parser.parse(f"{date_str} {year}")
+                month, day = parsed.month, parsed.day
+            except:
+                # Fallback manual parsing
+                month_names = {
+                    'Jan': 1, 'January': 1, 'Feb': 2, 'February': 2, 'Mar': 3, 'March': 3,
+                    'Apr': 4, 'April': 4, 'May': 5, 'Jun': 6, 'June': 6,
+                    'Jul': 7, 'July': 7, 'Aug': 8, 'August': 8, 'Sep': 9, 'September': 9,
+                    'Oct': 10, 'October': 10, 'Nov': 11, 'November': 11, 'Dec': 12, 'December': 12
+                }
+                parts = date_str.split()
+                month_str = parts[0]
+                # Try exact match first, then partial match
+                month = month_names.get(month_str)
+                if not month:
+                    for key, val in month_names.items():
+                        if month_str.lower().startswith(key.lower()[:3]):
+                            month = val
+                            break
+                if not month:
+                    month = 9  # Default to September
                 
-                return game_datetime
-            except ValueError as e:
-                logger.error(f"Invalid date components: year={year}, month={month}, day={day}, hour={hour}, minute={minute}")
-                raise
-        else:
-            logger.warning(f"Failed to extract complete date from: {date_str}")
+                try:
+                    day = int(parts[1]) if len(parts) > 1 else 1
+                except:
+                    day = 1
+        elif re.match(r'\d{1,2}/\d{1,2}', date_str):
+            # Handle MM/DD format
+            parts = date_str.split('/')
+            month = int(parts[0])
+            day = int(parts[1])
+        elif re.match(r'\d{4}-\d{2}-\d{2}', date_str):
+            # Handle YYYY-MM-DD format
+            parts = date_str.split('-')
+            year = int(parts[0])
+            month = int(parts[1])
+            day = int(parts[2])
+        
+        # If we still don't have month/day, log warning but don't default to Sept 1
+        if month is None or day is None:
+            logger.warning(f"Could not parse date: {date_str}. Using fallback.")
+            # Return None to indicate parsing failure
+            return None
+        
+        # Parse time with better handling
+        hour, minute = 12, 0  # Default to noon for college football
+        
+        if time_str and time_str.upper() not in ["TBA", "TBD", "", "TIME TBA"]:
+            is_pm = "PM" in time_str.upper()
+            is_am = "AM" in time_str.upper()
+            
+            # Extract just the time part
+            time_clean = re.sub(r'[^\d:]', '', time_str)
+            
+            if ":" in time_clean:
+                time_parts = time_clean.split(":")
+                try:
+                    hour = int(time_parts[0])
+                    minute = int(time_parts[1]) if len(time_parts) > 1 else 0
+                except:
+                    hour, minute = 12, 0
+            elif time_clean.isdigit() and len(time_clean) <= 2:
+                try:
+                    hour = int(time_clean)
+                    minute = 0
+                except:
+                    hour = 12
+            
+            # Handle AM/PM conversion
+            if is_pm and hour < 12:
+                hour += 12
+            elif is_am and hour == 12:
+                hour = 0
+            elif not is_am and not is_pm and hour < 8:
+                # If no AM/PM specified and hour is small, assume PM for college games
+                hour += 12
+        
+        # Validate the date
+        try:
+            result = datetime.datetime(year, month, day, hour, minute)
+            logger.debug(f"Successfully parsed: {result}")
+            return result
+        except ValueError as e:
+            logger.error(f"Invalid date/time values: year={year}, month={month}, day={day}, hour={hour}, minute={minute}")
             return None
     
     except Exception as e:
         logger.error(f"Error parsing date/time: {date_str}, {time_str} - {str(e)}")
         return None
 
-def scrape_schedule():
-    """Scrape the Penn State football schedule with improved parsing"""
-    logger.info("🏈 Starting schedule scraping...")
+def validate_schedule(games, season):
+    """Validate that the scraped schedule looks reasonable"""
+    if not games:
+        logger.error("No games found in schedule")
+        return False
+    
+    expected_count = EXPECTED_GAMES_PER_SEASON.get(season, MIN_GAMES_THRESHOLD)
+    
+    if len(games) < expected_count:
+        logger.error(f"Only found {len(games)} games for season {season}, expected at least {expected_count}")
+        return False
+    
+    # Check for suspicious dates (all games on same date, etc.)
+    dates = [game['start'].date() for game in games]
+    unique_dates = len(set(dates))
+    
+    if unique_dates < len(games) * 0.8:  # At least 80% should be on different dates
+        logger.error(f"Schedule has suspicious date distribution: {unique_dates} unique dates for {len(games)} games")
+        return False
+    
+    # Check for reasonable date range (games should span Aug-Dec for college football)
+    earliest = min(dates)
+    latest = max(dates)
+    
+    if earliest.month < 8 or latest.month > 12:
+        logger.warning(f"Games span unusual months: {earliest.month} to {latest.month}")
+    
+    # Check for games defaulting to Sept 1 (common parsing error)
+    sept_1_count = sum(1 for date in dates if date.month == 9 and date.day == 1)
+    if sept_1_count > 1:
+        logger.error(f"Too many games defaulting to September 1st ({sept_1_count}), likely parsing error")
+        return False
+    
+    logger.info(f"Schedule validation passed: {len(games)} games from {earliest} to {latest}")
+    return True
+
+def detect_schedule_structure(soup):
+    """Dynamically detect the schedule structure on SIDEARM pages"""
+    logger.info("Analyzing page structure for schedule data...")
+    
+    # Look for common SIDEARM schedule patterns
+    possible_containers = [
+        # Modern SIDEARM selectors
+        '.sidearm-schedule-games',
+        '.sidearm-schedule-games-container', 
+        '.schedule-list',
+        '.game-list',
+        '.event-listing',
+        
+        # Table-based layouts
+        'table.sidearm-table',
+        'table.schedule',
+        'table.schedule-table',
+        '.ResponsiveTable table',
+        
+        # Card/item based layouts
+        '.schedule-game',
+        '.game-card',
+        '.event-card',
+        '.schedule-item',
+        
+        # Generic containers that might hold games
+        '[data-module*="schedule"]',
+        '[id*="schedule"]',
+        '[class*="schedule"]'
+    ]
+    
+    for selector in possible_containers:
+        container = soup.select_one(selector)
+        if container:
+            # Look for individual game items within this container
+            game_selectors = [
+                '.sidearm-schedule-game',
+                '.schedule-game', 
+                '.game-item',
+                '.event-item',
+                'tr',  # Table rows
+                '.game',
+                '.event',
+                '[data-game]',
+                '[class*="game"]'
+            ]
+            
+            for game_sel in game_selectors:
+                games = container.select(game_sel)
+                if len(games) > 3:  # Must have several games to be valid
+                    logger.info(f"Found schedule structure: {selector} -> {game_sel} ({len(games)} items)")
+                    return container, game_sel
+    
+    logger.warning("Could not detect schedule structure")
+    return None, None
+
+def extract_game_data(game_element):
+    """Extract game data from a single game element using flexible selectors"""
+    try:
+        # Try multiple strategies to extract date
+        date_str = ""
+        date_selectors = [
+            '.date', '.game-date', '.event-date', '.schedule-date',
+            '.sidearm-schedule-game-opponent-date',
+            '[class*="date"]', 'time', '.datetime',
+            'td:first-child', '.first-col'
+        ]
+        
+        for sel in date_selectors:
+            date_elem = game_element.select_one(sel)
+            if date_elem:
+                date_str = date_elem.get_text(strip=True)
+                if date_str and any(char.isdigit() for char in date_str):
+                    break
+        
+        # Try multiple strategies to extract time
+        time_str = "12:00 PM"  # Better default for college football
+        time_selectors = [
+            '.time', '.game-time', '.event-time', '.schedule-time',
+            '.sidearm-schedule-game-opponent-time',
+            '[class*="time"]', '.kickoff'
+        ]
+        
+        for sel in time_selectors:
+            time_elem = game_element.select_one(sel)
+            if time_elem:
+                time_str = time_elem.get_text(strip=True)
+                if time_str and time_str.upper() not in ["", "TBA", "TBD"]:
+                    break
+        
+        # Try multiple strategies to extract opponent
+        opponent = ""
+        opponent_selectors = [
+            '.opponent', '.team-name', '.visitor', '.away-team', '.home-team',
+            '.sidearm-schedule-game-opponent-name',
+            '[class*="opponent"]', '[class*="team"]',
+            'a[href*="team"]', 'td:nth-child(2)'
+        ]
+        
+        for sel in opponent_selectors:
+            opp_elem = game_element.select_one(sel)
+            if opp_elem:
+                opponent = opp_elem.get_text(strip=True)
+                if opponent and len(opponent) > 2:
+                    break
+        
+        # If still no opponent, look in all text content
+        if not opponent:
+            all_text = game_element.get_text()
+            # Look for patterns like "vs Team" or "at Team"
+            match = re.search(r'(?:vs\.?\s+|at\s+|@\s*)([A-Za-z\s&]+)', all_text, re.IGNORECASE)
+            if match:
+                opponent = match.group(1).strip()
+        
+        # Determine home/away
+        all_text = game_element.get_text().lower()
+        is_away = any(indicator in all_text for indicator in ['at ', '@ ', 'away'])
+        is_home = not is_away
+        
+        # Clean opponent name
+        opponent = re.sub(r'^(vs\.?\s*|at\s*|@\s*)', '', opponent, flags=re.IGNORECASE).strip()
+        
+        return {
+            'date_str': date_str,
+            'time_str': time_str, 
+            'opponent': opponent,
+            'is_home': is_home,
+            'raw_text': game_element.get_text(strip=True)[:100]  # For debugging
+        }
+        
+    except Exception as e:
+        logger.error(f"Error extracting game data: {e}")
+        return None
+
+def scrape_penn_state_schedule(season=None):
+    """Modern SIDEARM-aware Penn State schedule scraper with improved error handling"""
+    if season is None:
+        season = get_current_season()
+    
+    logger.info(f"Scraping Penn State schedule for season {season}")
     games = []
     
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive',
-        }
+        headers = get_sidearm_headers()
+        session = requests.Session()
+        session.headers.update(headers)
         
-        response = requests.get(BASE_URL, headers=headers, timeout=30)
+        # Try the schedule page with multiple approaches
+        base_urls = [
+            f"https://gopsusports.com/sports/football/schedule/{season}",
+            f"https://gopsusports.com/sports/football/schedule",
+            f"https://gopsusports.com/schedule?sport=football&season={season}"
+        ]
+        
+        for url in base_urls:
+            try:
+                logger.info(f"Trying URL: {url}")
+                
+                # Add delay to avoid being flagged as bot
+                time.sleep(2)
+                
+                response = session.get(url, timeout=30)
+                
+                # Check for bot detection or ad blocker messages
+                if ("ad blocker" in response.text.lower() or 
+                    "blocks ads hinders" in response.text.lower() or 
+                    response.status_code == 403):
+                    logger.warning(f"Bot/ad blocker detection triggered for {url}")
+                    continue
+                
+                response.raise_for_status()
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Dynamically detect schedule structure
+                container, game_selector = detect_schedule_structure(soup)
+                
+                if not container:
+                    logger.warning(f"No schedule structure found on {url}")
+                    continue
+                
+                # Extract games using detected structure
+                game_elements = container.select(game_selector)
+                logger.info(f"Found {len(game_elements)} potential game elements")
+                
+                for game_elem in game_elements:
+                    game_data = extract_game_data(game_elem)
+                    
+                    if not game_data or not game_data['opponent']:
+                        continue
+                    
+                    # Create game info
+                    opponent = game_data['opponent']
+                    is_home = game_data['is_home']
+                    
+                    if is_home:
+                        title = f"{opponent} at Penn State"
+                        location = "University Park, Pa.\nBeaver Stadium"
+                    else:
+                        title = f"Penn State at {opponent}"
+                        location = ""
+                    
+                    game_datetime = parse_date_time(game_data['date_str'], game_data['time_str'], season)
+                    
+                    if not game_datetime:
+                        logger.warning(f"Could not parse datetime for {title}, skipping")
+                        continue
+                    
+                    duration = datetime.timedelta(hours=3, minutes=30)
+                    
+                    game_info = {
+                        'title': title,
+                        'start': game_datetime,
+                        'end': game_datetime + duration,
+                        'location': location,
+                        'broadcast': "",
+                        'is_home': is_home,
+                        'opponent': opponent,
+                        'date_str': game_data['date_str'],
+                        'time_str': game_data['time_str']
+                    }
+                    
+                    games.append(game_info)
+                    logger.info(f"Scraped: {title} on {game_datetime}")
+                
+                if games:
+                    logger.info(f"Successfully scraped {len(games)} games from {url}")
+                    return games
+                    
+            except Exception as e:
+                logger.error(f"Error with {url}: {e}")
+                continue
+        
+    except Exception as e:
+        logger.error(f"Error scraping Penn State schedule: {str(e)}")
+    
+    return games
+
+def scrape_espn_schedule(season=None):
+    """ESPN backup scraper with improved parsing"""
+    if season is None:
+        season = get_current_season()
+    
+    logger.info(f"Scraping ESPN for season {season}")
+    games = []
+    
+    try:
+        headers = get_sidearm_headers()
+        url = f"https://www.espn.com/college-football/team/schedule/_/id/213/season/{season}"
+        response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
-        
-        logger.info(f"✅ Successfully fetched page. Status code: {response.status_code}")
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Get all text and split into lines for pattern matching
-        page_text = soup.get_text()
-        lines = [line.strip() for line in page_text.split('\n') if line.strip()]
+        # ESPN schedule parsing - try multiple table formats
+        table = soup.find('table', class_='Table')
+        if not table:
+            table = soup.find('div', class_='ResponsiveTable')
+            if table:
+                table = table.find('table')
         
-        logger.info(f"📄 Page contains {len(lines)} non-empty lines")
-        
-        # Find the schedule section
-        schedule_start = -1
-        for i, line in enumerate(lines):
-            if 'Schedule Events' in line:
-                schedule_start = i + 1
-                logger.info(f"📋 Found schedule starting at line {schedule_start}")
-                break
-        
-        if schedule_start == -1:
-            logger.warning("❌ Could not find 'Schedule Events' section")
-            return []
-        
-        # Parse games using the pattern: home/away -> vs./at -> opponent -> location -> time
-        current_game = {}
-        games_found = []
-        
-        i = schedule_start
-        while i < len(lines) and i < schedule_start + 200:  # Limit search to reasonable range
-            line = lines[i]
-            
-            # Step 1: Look for home/away indicator
-            if line in ['home', 'away']:
-                # Save previous game if complete
-                if len(current_game) >= 4:  # Has all required fields
-                    games_found.append(dict(current_game))
-                    logger.info(f"✅ Completed game: {current_game.get('opponent', 'Unknown')}")
-                
-                # Start new game
-                current_game = {'is_home': (line == 'home')}
-                logger.info(f"🏟️ Starting {line} game")
-                
-            # Step 2: Look for vs./at indicator
-            elif line in ['vs.', 'at']:
-                if 'is_home' in current_game:
-                    current_game['vs_at'] = line
-                    logger.info(f"  📍 {line}")
-            
-            # Step 3: Look for opponent (should come right after vs./at)
-            elif 'vs_at' in current_game and 'opponent' not in current_game:
-                # This should be the opponent name
-                if line and not line.startswith('University Park') and not 'Stadium' in line:
-                    current_game['opponent'] = line
-                    logger.info(f"  🏈 Opponent: {line}")
-            
-            # Step 4: Look for location
-            elif 'opponent' in current_game and 'location' not in current_game:
-                # Look for location indicators
-                location_indicators = ['University Park', 'Pa.', 'Calif.', 'Ohio', 'Iowa', 'Mich.', 'N.J.', 'Stadium', 'Bowl']
-                if any(indicator in line for indicator in location_indicators):
-                    current_game['location'] = line
-                    logger.info(f"  📍 Location: {line}")
-            
-            # Step 5: Look for time
-            elif 'location' in current_game and 'time' not in current_game:
-                # Look for time indicators
-                time_indicators = ['PM', 'AM', 'TBA', 'noon', ':']
-                if any(indicator in line for indicator in time_indicators) or line == 'TBA':
-                    current_game['time'] = line
-                    logger.info(f"  🕒 Time: {line}")
-                    
-                    # Game is now complete - will be saved at start of next game or end of loop
-            
-            i += 1
-        
-        # Don't forget the last game
-        if len(current_game) >= 4:
-            games_found.append(dict(current_game))
-            logger.info(f"✅ Completed final game: {current_game.get('opponent', 'Unknown')}")
-        
-        logger.info(f"🎯 Raw games found: {len(games_found)}")
-        
-        # Now convert the raw game data to our format
-        for game_data in games_found:
-            try:
-                opponent = game_data.get('opponent', '')
-                is_home = game_data.get('is_home', True)
-                location = game_data.get('location', '')
-                time_str = game_data.get('time', 'TBA')
-                
-                # Skip if missing essential data
-                if not opponent or not location:
-                    logger.warning(f"⚠️ Skipping incomplete game: opponent='{opponent}', location='{location}'")
+        if table:
+            rows = table.find_all('tr')[1:]  # Skip header
+            for row in rows:
+                try:
+                    cells = row.find_all(['td', 'th'])
+                    if len(cells) >= 2:
+                        date_str = cells[0].get_text(strip=True)
+                        opponent_str = cells[1].get_text(strip=True)
+                        
+                        # Skip bye weeks
+                        if not opponent_str or opponent_str.lower() in ['bye', 'open']:
+                            continue
+                        
+                        # Extract time if available
+                        time_str = "12:00 PM"  # Default
+                        if len(cells) > 2:
+                            time_cell = cells[2].get_text(strip=True)
+                            if any(char.isdigit() for char in time_cell) and ("AM" in time_cell or "PM" in time_cell):
+                                time_str = time_cell
+                        
+                        is_away = 'at ' in opponent_str.lower() or '@' in opponent_str
+                        opponent = re.sub(r'^(vs\.?\s*|at\s*|@\s*)', '', opponent_str, flags=re.IGNORECASE).strip()
+                        
+                        if is_away:
+                            title = f"Penn State at {opponent}"
+                            location = ""
+                        else:
+                            title = f"{opponent} at Penn State"
+                            location = "University Park, Pa.\nBeaver Stadium"
+                        
+                        game_datetime = parse_date_time(date_str, time_str, season)
+                        
+                        if not game_datetime:
+                            logger.warning(f"Could not parse ESPN datetime for {title}, skipping")
+                            continue
+                        
+                        duration = datetime.timedelta(hours=3, minutes=30)
+                        
+                        game_info = {
+                            'title': title,
+                            'start': game_datetime,
+                            'end': game_datetime + duration,
+                            'location': location,
+                            'broadcast': "",
+                            'is_home': not is_away,
+                            'opponent': opponent,
+                            'date_str': date_str,
+                            'time_str': time_str
+                        }
+                        
+                        games.append(game_info)
+                        logger.info(f"ESPN: {title} on {game_datetime}")
+                        
+                except Exception as e:
+                    logger.error(f"Error parsing ESPN row: {e}")
                     continue
-                
-                # Extract dates - for 2025 season, we need to map opponents to dates
-                # Since the website doesn't show dates in the scraped content, use known schedule
-                date_mapping = {
-                    'Nevada': 'Aug 30, 2025',
-                    'FIU': 'Sep 6, 2025', 
-                    'Villanova': 'Sep 13, 2025',
-                    'Oregon': 'Sep 27, 2025',
-                    'UCLA': 'Oct 4, 2025',
-                    'Northwestern': 'Oct 11, 2025',
-                    'Iowa': 'Oct 18, 2025',
-                    'Ohio State': 'Nov 1, 2025',
-                    'Indiana': 'Nov 8, 2025',
-                    'Michigan State': 'Nov 15, 2025',
-                    'Nebraska': 'Nov 22, 2025',
-                    'Rutgers': 'Nov 29, 2025'
-                }
-                
-                date_str = date_mapping.get(opponent, "Sep 1, 2025")  # Default fallback
-                
-                # Determine broadcast network based on confirmed info
-                broadcast_mapping = {
-                    'Nevada': 'CBS',
-                    'FIU': 'Big Ten Network',
-                    'Oregon': 'NBC',
-                    'Villanova': 'TBA',
-                    'UCLA': 'TBA',
-                    'Northwestern': 'TBA',
-                    'Iowa': 'TBA',
-                    'Ohio State': 'TBA',
-                    'Indiana': 'TBA',
-                    'Michigan State': 'TBA',
-                    'Nebraska': 'TBA',
-                    'Rutgers': 'TBA'
-                }
-                
-                broadcast = broadcast_mapping.get(opponent, 'TBA')
-                
-                # Determine special events
-                special_events = {
-                    'Nevada': '107K Family Reunion',
-                    'FIU': 'THON Game',
-                    'Villanova': 'All-U Day',
-                    'Oregon': 'Penn State White Out',
-                    'Northwestern': 'Homecoming & Stripe Out',
-                    'Indiana': 'Helmet Stripe & Military Appreciation',
-                    'Nebraska': 'Senior Day'
-                }
-                
-                special = special_events.get(opponent, '')
-                
-                # Create title
-                if is_home:
-                    if special:
-                        title = f"{opponent} at Penn State - {special}"
-                    else:
-                        title = f"{opponent} at Penn State"
-                else:
-                    title = f"Penn State at {opponent}"
-                
-                # Parse date/time
-                game_datetime = parse_date_time(date_str, time_str)
-                if not game_datetime:
-                    logger.warning(f"⚠️ Skipping game due to date parsing failure: {opponent}")
-                    continue
-                
-                # Game duration (3.5 hours)
-                duration = datetime.timedelta(hours=3, minutes=30)
-                
-                # Enhance location with special event info
-                enhanced_location = location
-                if special and is_home:
-                    enhanced_location = f"{special} - {location}"
-                
-                game_info = {
-                    'title': title,
-                    'start': game_datetime,
-                    'end': game_datetime + duration,
-                    'location': enhanced_location,
-                    'broadcast': broadcast,
-                    'is_home': is_home,
-                    'opponent': opponent,
-                    'date_str': date_str,
-                    'time_str': time_str,
-                    'special': special
-                }
-                
-                games.append(game_info)
-                logger.info(f"✅ Added game: {title} on {game_datetime} (Broadcast: {broadcast})")
-                
-            except Exception as e:
-                logger.error(f"❌ Error processing game {game_data}: {str(e)}")
-                continue
         
-    except requests.RequestException as e:
-        logger.error(f"❌ Error fetching schedule page: {str(e)}")
-        return []
-    
     except Exception as e:
-        logger.error(f"❌ Error scraping schedule: {str(e)}")
-        import traceback
-        logger.error(f"Full traceback: {traceback.format_exc()}")
-        return []
+        logger.error(f"Error scraping ESPN: {str(e)}")
     
-    # Remove duplicates
-    deduplicated_games = []
-    seen_games = set()
+    return games
+
+def scrape_schedule(season=None):
+    """Main scraping function - fails if insufficient games found"""
+    if season is None:
+        season = get_current_season()
     
-    for game in games:
-        if game.get('start'):
-            game_id = f"{game['start'].date()}_{game['opponent']}"
-            if game_id not in seen_games:
-                seen_games.add(game_id)
-                deduplicated_games.append(game)
+    logger.info("Starting schedule scraping...")
+    
+    # Try Penn State first, then ESPN - NO FALLBACK DATA
+    sources = [
+        ("Penn State SIDEARM", scrape_penn_state_schedule),
+        ("ESPN", scrape_espn_schedule)
+    ]
+    
+    for source_name, scrape_func in sources:
+        logger.info(f"Trying {source_name}...")
+        try:
+            games = scrape_func(season)
+            if games and validate_schedule(games, season):
+                logger.info(f"Success: {len(games)} valid games from {source_name}")
+                return games
+            elif games:
+                logger.warning(f"{source_name} returned {len(games)} games but failed validation")
             else:
-                logger.info(f"🔄 Skipping duplicate: {game['title']}")
-        else:
-            logger.warning(f"⚠️ Skipping game with no start time: {game.get('title', 'Unknown')}")
+                logger.warning(f"No games from {source_name}")
+        except Exception as e:
+            logger.error(f"{source_name} failed: {e}")
+            continue
     
-    logger.info(f"🏈 Final game count: {len(deduplicated_games)}")
-    
-    # Log a sample of games for debugging
-    if deduplicated_games:
-        logger.info("📋 Sample games found:")
-        for i, game in enumerate(deduplicated_games[:3]):
-            start_str = game['start'].strftime('%Y-%m-%d %I:%M %p') if game.get('start') else 'No time'
-            logger.info(f"  {i+1}. {game['title']} - {start_str} (TV: {game.get('broadcast', 'N/A')})")
-    else:
-        logger.error("❌ No valid games found after processing")
-    
-    return deduplicated_games
+    logger.error("All scraping sources failed or returned insufficient/invalid data")
+    return []
 
 def create_calendar(games):
-    """Create an iCalendar file from the scraped games with proper timezone handling"""
+    """Create iCalendar file"""
     cal = Calendar()
-    cal.creator = "Penn State Football Schedule Scraper"
-    
-    valid_games = 0
-    skipped_games = 0
-    
-    logger.info(f"🗓️ Creating calendar with {len(games)} games...")
+    cal._prodid = "Penn State Football Schedule - https://raw.githubusercontent.com/YOUR_USERNAME/PennStateFootballSchedule/main/penn_state_football.ics"
     
     for game in games:
-        if (game.get('opponent') and 
-            game.get('location') and 
-            game.get('start')):
-            
-            event = Event()
-            event.name = game['title']
-            
-            # Set the start and end times
-            event.begin = game['start']
-            event.end = game['end']
-            
-            event.location = game['location']
-            
-            # Enhanced description with all available info
-            description_parts = []
-            
-            if game.get('broadcast') and game['broadcast'] != "TBA":
-                description_parts.append(f"📺 TV: {game['broadcast']}")
-            elif game.get('broadcast') == "TBA":
-                description_parts.append(f"📺 TV: To Be Announced")
-            
-            if game.get('is_home'):
-                description_parts.append("🏟️ Home Game")
-            else:
-                description_parts.append("✈️ Away Game")
-            
-            if game.get('special'):
-                description_parts.append(f"🎉 Special Event: {game['special']}")
-            
-            # Add opponent info
-            description_parts.append(f"🏈 Opponent: {game['opponent']}")
-            
-            # Add time info if it was TBA
-            if game.get('time_str') == "TBA":
-                description_parts.append("⏰ Game time to be announced")
-            
-            # Add timezone information for clarity
-            if hasattr(game['start'], 'tzinfo') and game['start'].tzinfo:
-                if HAS_PYTZ:
-                    tz_name = game['start'].strftime('%Z')
-                    description_parts.append(f"🕒 Timezone: {tz_name}")
-                else:
-                    description_parts.append(f"🕒 Times in Eastern Time")
-            
-            event.description = "\n".join(description_parts)
-            
-            # Set event properties
-            event.transparent = False  # Show as busy
-            event.classification = "PUBLIC"
-            
-            cal.events.add(event)
-            valid_games += 1
-            
-            # Log with timezone info for debugging
-            if hasattr(game['start'], 'strftime'):
-                start_time_str = game['start'].strftime('%Y-%m-%d %I:%M %p')
-                if hasattr(game['start'], 'tzinfo') and game['start'].tzinfo:
-                    start_time_str += f" {game['start'].strftime('%Z')}"
-            else:
-                start_time_str = str(game['start'])
-            
-            logger.info(f"✅ Added: {game['title']} at {start_time_str} ({game.get('broadcast', 'No TV')})")
-        else:
-            skipped_games += 1
-            missing = []
-            if not game.get('opponent'):
-                missing.append("opponent")
-            if not game.get('location'):
-                missing.append("location")
-            if not game.get('start'):
-                missing.append("start time")
-            
-            logger.warning(f"❌ Skipped incomplete game - missing: {', '.join(missing)}")
-    
-    # Save calendar
-    try:
-        with open(CALENDAR_FILE, 'w', encoding='utf-8') as f:
-            calendar_content = cal.serialize()
-            f.write(calendar_content)
-            
-        logger.info(f"💾 Calendar saved: {valid_games} events, {skipped_games} skipped")
+        event = Event()
+        event.name = game['title']
+        event.begin = game['start']
+        event.end = game['end']
+        event.location = game['location']
         
-        # Log file size and sample content for debugging
-        file_size = os.path.getsize(CALENDAR_FILE) if os.path.exists(CALENDAR_FILE) else 0
-        logger.info(f"📊 Calendar file size: {file_size} bytes")
-        
-        # Log a sample of the calendar content for debugging
-        if file_size > 0:
-            with open(CALENDAR_FILE, 'r', encoding='utf-8') as f:
-                content = f.read()
-                lines = content.split('\n')
-                dtstart_lines = [line for line in lines if line.startswith('DTSTART')]
-                summary_lines = [line for line in lines if line.startswith('SUMMARY')]
-                
-                if dtstart_lines:
-                    logger.info(f"🕒 Sample DTSTART times: {dtstart_lines[:2]}")
-                if summary_lines:
-                    logger.info(f"🏈 Sample events: {summary_lines[:2]}")
-                
-    except Exception as e:
-        logger.error(f"❌ Error saving calendar: {str(e)}")
-        raise
+        description = ""
+        if game['broadcast']:
+            description += f"Broadcast: {game['broadcast']}\n"
+        description += "Home Game" if game['is_home'] else "Away Game"
+        if game['opponent']:
+            description += f"\nOpponent: {game['opponent']}"
+            
+        event.description = description
+        cal.events.add(event)
     
+    with open(CALENDAR_FILE, 'w') as f:
+        f.write(cal.serialize())
+    
+    logger.info(f"Calendar created with {len(games)} events")
     return cal
 
-def update_calendar():
-    """Update the football calendar"""
+def update_calendar(custom_season=None):
+    """Update the calendar - fails if scraping unsuccessful"""
     try:
-        logger.info("🔄 Starting calendar update...")
-        games = scrape_schedule()
+        season = custom_season or get_current_season()
+        games = scrape_schedule(season)
         
         if not games:
-            logger.error("❌ No games found, cannot create calendar")
-            return
+            logger.error("No games found - calendar update failed")
+            return False
+        
+        if not validate_schedule(games, season):
+            logger.error("Schedule validation failed - calendar update aborted")
+            return False
             
-        logger.info(f"✅ Found {len(games)} games, creating calendar...")
         create_calendar(games)
-        logger.info("🎉 Calendar updated successfully")
+        logger.info(f"Calendar updated successfully with {len(games)} validated games")
+        return True
         
     except Exception as e:
-        logger.error(f"❌ Error updating calendar: {str(e)}")
-        import traceback
-        logger.error(f"Full traceback: {traceback.format_exc()}")
-        raise
+        logger.error(f"Error updating calendar: {str(e)}")
+        return False
 
 @app.route('/calendar.ics')
 def serve_calendar():
     """Serve the calendar file"""
     try:
-        if not os.path.exists(CALENDAR_FILE):
-            logger.warning("Calendar file doesn't exist, creating it...")
-            update_calendar()
-        
-        with open(CALENDAR_FILE, 'r', encoding='utf-8') as f:
+        with open(CALENDAR_FILE, 'r') as f:
             cal_content = f.read()
-        
-        response = Response(cal_content, mimetype='text/calendar')
-        response.headers['Content-Disposition'] = 'attachment; filename=penn_state_football.ics'
-        return response
+            
+        # Add raw GitHub URL to the PRODID field if not already present
+        if "PRODID:" in cal_content and "raw.githubusercontent.com" not in cal_content:
+            cal_content = cal_content.replace(
+                "PRODID:ics.py - http://git.io/lLljaA",
+                "PRODID:Penn State Football Schedule - https://raw.githubusercontent.com/YOUR_USERNAME/PennStateFootballSchedule/main/penn_state_football.ics"
+            )
+            
+        return Response(cal_content, mimetype='text/calendar')
     except Exception as e:
         logger.error(f"Error serving calendar: {str(e)}")
         return "Calendar not available", 500
 
 @app.route('/')
 def index():
-    """Enhanced landing page with better information"""
-    calendar_url = "https://raw.githubusercontent.com/lordofthetrees/PSUFootballSchedule/main/penn_state_football.ics"
-    
-    return f"""
-    <!DOCTYPE html>
+    """Landing page"""
+    return """
     <html>
         <head>
             <title>Penn State Football Calendar</title>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
-                body {{
+                body {
                     font-family: Arial, sans-serif;
                     max-width: 800px;
                     margin: 0 auto;
                     padding: 20px;
-                    background-color: #f5f5f5;
-                }}
-                .header {{
-                    background-color: #041E42;
-                    color: white;
+                    line-height: 1.6;
+                }
+                h1 {
+                    color: #041e42; /* Penn State Blue */
+                }
+                .container {
+                    border: 1px solid #ddd;
                     padding: 20px;
-                    text-align: center;
-                    border-radius: 10px;
-                    margin-bottom: 20px;
-                }}
-                .container {{
-                    background-color: white;
-                    padding: 20px;
-                    border-radius: 10px;
-                    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-                    margin-bottom: 20px;
-                }}
-                .url-box {{
-                    background-color: #f0f0f0;
-                    padding: 15px;
                     border-radius: 5px;
-                    font-family: monospace;
-                    word-break: break-all;
-                    margin: 10px 0;
-                }}
-                .btn {{
-                    background-color: #041E42;
-                    color: white;
-                    padding: 12px 24px;
+                    background-color: #f9f9f9;
+                }
+                pre {
+                    background-color: #eee;
+                    padding: 10px;
+                    border-radius: 5px;
+                    overflow-x: auto;
+                }
+                a {
+                    color: #041e42;
                     text-decoration: none;
-                    border-radius: 5px;
-                    display: inline-block;
-                    margin: 10px 10px 10px 0;
-                }}
-                .btn:hover {{
-                    background-color: #0066CC;
-                }}
-                .footer {{
-                    text-align: center;
-                    color: #666;
-                    font-size: 0.9em;
+                }
+                a:hover {
+                    text-decoration: underline;
+                }
+                .footer {
                     margin-top: 30px;
-                }}
-                .features {{
-                    display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-                    gap: 15px;
-                    margin: 20px 0;
-                }}
-                .feature {{
-                    background-color: #f8f9fa;
-                    padding: 15px;
-                    border-radius: 8px;
-                    border-left: 4px solid #041E42;
-                }}
-                .feature h4 {{
-                    margin-top: 0;
-                    color: #041E42;
-                }}
+                    font-size: 0.8em;
+                    color: #777;
+                }
             </style>
         </head>
         <body>
-            <div class="header">
-                <h1>🏈 Penn State Football Calendar</h1>
-                <p>Stay up-to-date with all Nittany Lions games!</p>
-            </div>
-            
+            <h1>Penn State Football Calendar</h1>
             <div class="container">
-                <h2>Subscribe to Calendar</h2>
-                <p>Add this calendar to your preferred calendar app using the URL below:</p>
-                <div class="url-box">{calendar_url}</div>
-                
-                <div style="text-align: center;">
-                    <a href="{calendar_url}" class="btn">📥 Download Calendar File</a>
-                    <a href="/debug" class="btn">🔍 View Schedule Details</a>
-                </div>
+                <p>This calendar provides a schedule of Penn State Football games that you can add to your calendar app.</p>
+                <p>To subscribe to this calendar in your calendar app, use this URL:</p>
+                <pre>https://raw.githubusercontent.com/YOUR_USERNAME/PennStateFootballSchedule/main/penn_state_football.ics</pre>
+                <p><a href="https://raw.githubusercontent.com/YOUR_USERNAME/PennStateFootballSchedule/main/penn_state_football.ics">Direct Link to Calendar File</a></p>
+                <p>The calendar updates daily with the latest game information.</p>
             </div>
-            
-            <div class="container">
-                <h2>Features</h2>
-                <div class="features">
-                    <div class="feature">
-                        <h4>📺 TV Information</h4>
-                        <p>Includes broadcast network details when available (CBS, NBC, Big Ten Network, etc.)</p>
-                    </div>
-                    <div class="feature">
-                        <h4>🏟️ Game Locations</h4>
-                        <p>Full venue information for both home and away games</p>
-                    </div>
-                    <div class="feature">
-                        <h4>🎉 Special Events</h4>
-                        <p>White Out, Homecoming, Senior Day, and other special game designations</p>
-                    </div>
-                    <div class="feature">
-                        <h4>🔄 Auto-Updates</h4>
-                        <p>Calendar updates daily with the latest game times and TV information</p>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="container">
-                <h2>How to Use</h2>
-                <ol>
-                    <li><strong>Copy the URL above</strong> to your clipboard</li>
-                    <li><strong>Open your calendar app</strong> (Apple Calendar, Google Calendar, Outlook, etc.)</li>
-                    <li><strong>Add a new calendar subscription</strong> using the URL</li>
-                    <li><strong>Your calendar will sync</strong> automatically with updates!</li>
-                </ol>
-                
-                <h3>Platform-Specific Instructions:</h3>
-                <ul>
-                    <li><strong>iPhone/Mac:</strong> Settings → Accounts & Passwords → Add Account → Other → Add Subscribed Calendar</li>
-                    <li><strong>Google Calendar:</strong> Settings → Add calendar → From URL</li>
-                    <li><strong>Outlook:</strong> Add calendar → From internet</li>
-                </ul>
-            </div>
-            
             <div class="footer">
-                <p>📊 Data sourced from <a href="https://gopsusports.com">gopsusports.com</a></p>
-                <p>⚠️ This service is not affiliated with Penn State University</p>
-                <p>🔧 Updated daily at 3:00 AM ET with the latest schedule information</p>
-                <p>📧 Questions? Check out the <a href="https://github.com/lordofthetrees/PSUFootballSchedule">GitHub repository</a></p>
+                <p>Data sourced from gopsusports.com with ESPN as backup. Updated daily.</p>
+                <p>This service is not affiliated with Penn State University.</p>
+                <p>Source code available on <a href="https://github.com/YOUR_USERNAME/PennStateFootballSchedule">GitHub</a>.</p>
             </div>
         </body>
     </html>
@@ -759,265 +703,92 @@ def index():
 
 @app.route('/debug')
 def debug_info():
-    """Show debugging information about scraped games with enhanced details"""
+    """Debug information"""
     try:
-        games = scrape_schedule()
+        current_season = get_current_season()
+        games = scrape_schedule(current_season)
         
-        debug_html = """
-        <!DOCTYPE html>
-        <html>
-            <head>
-                <title>Penn State Football Schedule - Debug Info</title>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <style>
-                    body { 
-                        font-family: Arial, sans-serif; 
-                        padding: 20px; 
-                        background-color: #f5f5f5;
-                    }
-                    .container {
-                        max-width: 1200px;
-                        margin: 0 auto;
-                        background-color: white;
-                        padding: 20px;
-                        border-radius: 10px;
-                        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-                    }
-                    table { 
-                        border-collapse: collapse; 
-                        width: 100%; 
-                        margin-top: 20px;
-                    }
-                    th, td { 
-                        border: 1px solid #ddd; 
-                        padding: 12px; 
-                        text-align: left; 
-                        vertical-align: top;
-                    }
-                    tr:nth-child(even) { 
-                        background-color: #f9f9f9; 
-                    }
-                    th { 
-                        background-color: #041E42; 
-                        color: white; 
-                        font-weight: bold;
-                    }
-                    h1 { 
-                        color: #041E42; 
-                        text-align: center;
-                        margin-bottom: 10px;
-                    }
-                    .subtitle {
-                        text-align: center;
-                        color: #666;
-                        margin-bottom: 20px;
-                    }
-                    .home-game { 
-                        background-color: #e8f5e8; 
-                    }
-                    .away-game { 
-                        background-color: #fff3e0; 
-                    }
-                    .special-event {
-                        font-weight: bold;
-                        color: #041E42;
-                    }
-                    .broadcast-info {
-                        font-weight: bold;
-                    }
-                    .tba {
-                        color: #999;
-                        font-style: italic;
-                    }
-                    .stats {
-                        display: grid;
-                        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                        gap: 15px;
-                        margin-bottom: 20px;
-                    }
-                    .stat-box {
-                        background-color: #041E42;
-                        color: white;
-                        padding: 15px;
-                        border-radius: 8px;
-                        text-align: center;
-                    }
-                    .stat-number {
-                        font-size: 2em;
-                        font-weight: bold;
-                        display: block;
-                    }
-                    .back-link {
-                        display: inline-block;
-                        background-color: #041E42;
-                        color: white;
-                        padding: 10px 20px;
-                        text-decoration: none;
-                        border-radius: 5px;
-                        margin-bottom: 20px;
-                    }
-                    .back-link:hover {
-                        background-color: #0066CC;
-                    }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <a href="/" class="back-link">← Back to Main Page</a>
-                    
-                    <h1>🏈 Penn State Football Schedule</h1>
-                    <p class="subtitle">Debug Information & Schedule Details</p>
-                    
-                    <div class="stats">
-                        <div class="stat-box">
-                            <span class="stat-number">""" + str(len(games)) + """</span>
-                            Total Games
-                        </div>
-                        <div class="stat-box">
-                            <span class="stat-number">""" + str(len([g for g in games if g.get('is_home')])) + """</span>
-                            Home Games
-                        </div>
-                        <div class="stat-box">
-                            <span class="stat-number">""" + str(len([g for g in games if not g.get('is_home')])) + """</span>
-                            Away Games
-                        </div>
-                        <div class="stat-box">
-                            <span class="stat-number">""" + str(len([g for g in games if g.get('broadcast') and g.get('broadcast') != 'TBA'])) + """</span>
-                            TV Confirmed
-                        </div>
-                    </div>
-                    
-                    <table>
-                        <tr>
-                            <th>Date</th>
-                            <th>Game</th>
-                            <th>Time</th>
-                            <th>Location</th>
-                            <th>TV Network</th>
-                            <th>Special Event</th>
-                        </tr>
-        """
+        if not games:
+            return "No games found. Check the logs for error details.", 500
         
-        for game in games:
-            row_class = "home-game" if game.get('is_home') else "away-game"
-            
-            # Format date
-            game_date = game['start'].strftime('%a, %b %d, %Y') if game.get('start') else 'Unknown'
-            
-            # Format time
-            game_time = game['start'].strftime('%I:%M %p ET') if game.get('start') else game.get('time_str', 'TBA')
-            if game.get('time_str') == 'TBA':
-                game_time = '<span class="tba">TBA</span>'
-            
-            # Format broadcast
-            broadcast = game.get('broadcast', 'TBA')
-            broadcast_class = 'broadcast-info' if broadcast and broadcast != 'TBA' else 'tba'
-            broadcast_display = f'<span class="{broadcast_class}">{broadcast}</span>'
-            
-            # Format special event
-            special = game.get('special', '')
-            special_display = f'<span class="special-event">{special}</span>' if special else ''
-            
-            debug_html += f"""
-                        <tr class="{row_class}">
-                            <td>{game_date}</td>
-                            <td><strong>{game['title']}</strong></td>
-                            <td>{game_time}</td>
-                            <td>{game.get('location', 'Unknown')}</td>
-                            <td>{broadcast_display}</td>
-                            <td>{special_display}</td>
-                        </tr>
-            """
-        
-        debug_html += """
-                    </table>
-                    
-                    <div style="margin-top: 30px; padding: 20px; background-color: #f8f9fa; border-radius: 8px;">
-                        <h3>🔧 Technical Information</h3>
-                        <ul>
-                            <li><strong>Last Updated:</strong> """ + datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S ET') + """</li>
-                            <li><strong>Data Source:</strong> <a href="https://gopsusports.com/sports/football/schedule">gopsusports.com</a></li>
-                            <li><strong>Update Frequency:</strong> Daily at 3:00 AM ET</li>
-                            <li><strong>Calendar Format:</strong> iCalendar (.ics)</li>
-                            <li><strong>GitHub Repository:</strong> <a href="https://github.com/lordofthetrees/PSUFootballSchedule">PSUFootballSchedule</a></li>
-                        </ul>
-                        
-                        <h4>🎨 Legend</h4>
-                        <ul>
-                            <li><span style="background-color: #e8f5e8; padding: 2px 8px;">Green background</span> = Home games</li>
-                            <li><span style="background-color: #fff3e0; padding: 2px 8px;">Orange background</span> = Away games</li>
-                            <li><span class="tba">Gray italic text</span> = To be announced</li>
-                            <li><span class="special-event">Blue bold text</span> = Special events (White Out, Homecoming, etc.)</li>
-                        </ul>
-                    </div>
-                </div>
-            </body>
-        </html>
-        """
-        
-        return debug_html
-        
+        return Response(
+            '<html><head><title>Debug Info</title>'
+            '<style>'
+            'body { font-family: Arial, sans-serif; padding: 20px; }'
+            'table { border-collapse: collapse; width: 100%; }'
+            'th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }'
+            'tr:nth-child(even) { background-color: #f2f2f2; }'
+            'th { background-color: #041e42; color: white; }'
+            'h1 { color: #041e42; }'
+            '.season-selector { margin: 20px 0; }'
+            '</style>'
+            '</head><body>'
+            f'<h1>Penn State Football Schedule - Debug Info (Season {current_season})</h1>'
+            '<div class="season-selector">'
+            '<p>View a different season: '
+            '<a href="/season/2023">2023</a> | '
+            '<a href="/season/2024">2024</a> | '
+            '<a href="/season/2025">2025</a>'
+            '</p></div>'
+            '<p>This page shows the raw data extracted with improved parsing.</p>'
+            '<table>'
+            '<tr><th>Game</th><th>Date</th><th>Time</th><th>Location</th><th>Broadcast</th></tr>'
+            + ''.join([
+                f'<tr><td>{g["title"]}</td><td>{g["date_str"]}</td><td>{g["time_str"]}</td>'
+                f'<td>{g["location"]}</td><td>{g["broadcast"]}</td></tr>'
+                for g in games
+            ])
+            + '</table>'
+            '<p>Total games found: ' + str(len(games)) + '</p>'
+            '</body></html>',
+            mimetype='text/html'
+        )
     except Exception as e:
-        error_html = f"""
-        <!DOCTYPE html>
-        <html>
-            <head>
-                <title>Debug Error</title>
-                <style>
-                    body {{ font-family: Arial, sans-serif; padding: 20px; }}
-                    .error {{ background-color: #ffe6e6; padding: 20px; border-radius: 8px; border-left: 4px solid #ff0000; }}
-                </style>
-            </head>
-            <body>
-                <div class="error">
-                    <h2>Debug Error</h2>
-                    <p><strong>Error:</strong> {str(e)}</p>
-                    <p><a href="/">← Back to Main Page</a></p>
-                </div>
-            </body>
-        </html>
-        """
-        return error_html
+        return f"Error: {str(e)}", 500
+
+@app.route('/season/<int:year>')
+def set_season(year):
+    """Allow changing the season via URL"""
+    try:
+        # Validate year is reasonable (between 2020 and current year + 2)
+        current_year = datetime.datetime.now().year
+        if year < 2020 or year > current_year + 2:
+            return f"Invalid season year: {year}. Must be between 2020 and {current_year + 2}", 400
+        
+        logger.info(f"Manual season change request to {year}")
+        
+        # Scrape the specified season
+        games = scrape_schedule(year)
+        
+        # Create/update the calendar
+        if games:
+            create_calendar(games)
+            return f"Calendar updated for season {year}. Found {len(games)} games. <a href='/calendar.ics'>Download Calendar</a>", 200
+        else:
+            return f"No games found for season {year}. Please check the logs for details.", 500
+            
+    except Exception as e:
+        logger.error(f"Error processing season {year}: {str(e)}")
+        return f"Error: {str(e)}", 500
 
 if __name__ == "__main__":
-    # Create initial calendar
-    logger.info("Starting Penn State Football Calendar Service...")
-    
-    try:
-        update_calendar()
-        logger.info("Initial calendar created successfully")
-    except Exception as e:
-        logger.error(f"Failed to create initial calendar: {str(e)}")
+    # Display startup information
+    current_season = get_current_season()
+    logger.info(f"Starting Penn State Football Schedule Scraper for season {current_season}")
+    logger.info("Using improved parsing with fallback data support")
     
     # Create scheduler for daily updates
     scheduler = BackgroundScheduler()
     
-    # Schedule daily updates at 3 AM ET (7 AM UTC)
-    scheduler.add_job(
-        func=update_calendar,
-        trigger='cron',
-        hour=7,  # 3 AM ET = 7 AM UTC
-        minute=0,
-        id='daily_update',
-        name='Daily Calendar Update'
-    )
+    # Initial calendar creation
+    success = update_calendar()
+    if not success:
+        logger.error("Initial calendar creation failed")
     
-    try:
-        scheduler.start()
-        logger.info("Scheduler started - daily updates at 3 AM ET")
-    except Exception as e:
-        logger.error(f"Failed to start scheduler: {str(e)}")
+    # Schedule daily updates at 3 AM
+    scheduler.add_job(update_calendar, 'cron', hour=3)
+    scheduler.start()
     
     # Run the Flask app
     port = int(os.environ.get("PORT", 5000))
-    logger.info(f"Starting Flask app on port {port}")
-    
-    try:
-        app.run(host='0.0.0.0', port=port, debug=False)
-    except KeyboardInterrupt:
-        logger.info("Shutting down...")
-        scheduler.shutdown()
-    except Exception as e:
-        logger.error(f"Flask app error: {str(e)}")
-        scheduler.shutdown()
+    app.run(host='0.0.0.0', port=port)
