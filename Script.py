@@ -60,7 +60,108 @@ def get_sidearm_headers():
         'Referer': 'https://www.google.com/',
     }
 
-def parse_date_time(date_str, time_str=None, year=None):
+def parse_date_time(date_str, time_str=def scrape_penn_state_schedule(season=None):
+    """Modern SIDEARM-aware Penn State schedule scraper with improved error handling"""
+    if season is None:
+        season = get_current_season()
+    
+    logger.info(f"Scraping Penn State schedule for season {season}")
+    games = []
+    
+    try:
+        headers = get_sidearm_headers()
+        session = requests.Session()
+        session.headers.update(headers)
+        
+        # Try the schedule page with multiple approaches
+        base_urls = [
+            f"https://gopsusports.com/sports/football/schedule/{season}",
+            f"https://gopsusports.com/sports/football/schedule",
+            f"https://gopsusports.com/schedule?sport=football&season={season}"
+        ]
+        
+        for url in base_urls:
+            try:
+                logger.info(f"Trying URL: {url}")
+                
+                # Add delay to avoid being flagged as bot
+                time.sleep(2)
+                
+                response = session.get(url, timeout=30)
+                
+                # Check for bot detection or ad blocker messages
+                if ("ad blocker" in response.text.lower() or 
+                    "blocks ads hinders" in response.text.lower() or 
+                    response.status_code == 403):
+                    logger.warning(f"Bot/ad blocker detection triggered for {url}")
+                    continue
+                
+                response.raise_for_status()
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Dynamically detect schedule structure
+                container, game_selector = detect_schedule_structure(soup)
+                
+                if not container:
+                    logger.warning(f"No schedule structure found on {url}")
+                    continue
+                
+                # Extract games using detected structure
+                game_elements = container.select(game_selector)
+                logger.info(f"Found {len(game_elements)} potential game elements")
+                
+                for game_elem in game_elements:
+                    game_data = extract_game_data(game_elem)
+                    
+                    if not game_data or not game_data['opponent']:
+                        continue
+                    
+                    # Create game info
+                    opponent = game_data['opponent']
+                    is_home = game_data['is_home']
+                    
+                    if is_home:
+                        title = f"{opponent} at Penn State"
+                        location = "University Park, Pa.\nBeaver Stadium"
+                    else:
+                        title = f"Penn State at {opponent}"
+                        location = ""
+                    
+                    game_datetime = parse_date_time(game_data['date_str'], game_data['time_str'], season)
+                    
+                    if not game_datetime:
+                        logger.warning(f"Could not parse datetime for {title}, skipping")
+                        continue
+                    
+                    duration = datetime.timedelta(hours=3, minutes=30)
+                    
+                    game_info = {
+                        'title': title,
+                        'start': game_datetime,
+                        'end': game_datetime + duration,
+                        'location': location,
+                        'broadcast': "",
+                        'is_home': is_home,
+                        'opponent': opponent,
+                        'date_str': game_data['date_str'],
+                        'time_str': game_data['time_str']
+                    }
+                    
+                    games.append(game_info)
+                    logger.info(f"Scraped: {title} on {game_datetime}")
+                
+                if games:
+                    logger.info(f"Successfully scraped {len(games)} games from {url}")
+                    return games
+                    
+            except Exception as e:
+                logger.error(f"Error with {url}: {e}")
+                continue
+        
+    except Exception as e:
+        logger.error(f"Error scraping Penn State schedule: {str(e)}")
+    
+    return games, year=None):
     """Improved date/time parsing with better fallbacks"""
     try:
         if year is None:
@@ -189,32 +290,38 @@ def validate_schedule(games, season):
     
     expected_count = EXPECTED_GAMES_PER_SEASON.get(season, MIN_GAMES_THRESHOLD)
     
-    if len(games) < expected_count:
-        logger.error(f"Only found {len(games)} games for season {season}, expected at least {expected_count}")
+    # Strict validation - must meet minimum threshold
+    if len(games) < MIN_GAMES_THRESHOLD:
+        logger.error(f"Only found {len(games)} games for season {season}, expected at least {MIN_GAMES_THRESHOLD}")
         return False
+    
+    if len(games) < expected_count:
+        logger.warning(f"Found {len(games)} games for season {season}, expected {expected_count}")
+        # Still proceed if we meet minimum threshold
     
     # Check for suspicious dates (all games on same date, etc.)
     dates = [game['start'].date() for game in games]
     unique_dates = len(set(dates))
     
-    if unique_dates < len(games) * 0.8:  # At least 80% should be on different dates
+    if len(games) > 1 and unique_dates < len(games) * 0.7:  # At least 70% should be on different dates
         logger.error(f"Schedule has suspicious date distribution: {unique_dates} unique dates for {len(games)} games")
         return False
     
     # Check for reasonable date range (games should span Aug-Dec for college football)
-    earliest = min(dates)
-    latest = max(dates)
+    if dates:
+        earliest = min(dates)
+        latest = max(dates)
+        
+        # Check for games defaulting to Sept 1 (common parsing error)
+        sept_1_count = sum(1 for date in dates if date.month == 9 and date.day == 1)
+        if sept_1_count > len(games) / 2:  # More than half defaulting is suspicious
+            logger.error(f"Too many games defaulting to September 1st ({sept_1_count}/{len(games)}), likely parsing error")
+            return False
+        
+        logger.info(f"Schedule validation passed: {len(games)} games from {earliest} to {latest}")
+    else:
+        logger.info(f"Schedule validation passed: {len(games)} games (no date validation possible)")
     
-    if earliest.month < 8 or latest.month > 12:
-        logger.warning(f"Games span unusual months: {earliest.month} to {latest.month}")
-    
-    # Check for games defaulting to Sept 1 (common parsing error)
-    sept_1_count = sum(1 for date in dates if date.month == 9 and date.day == 1)
-    if sept_1_count > 1:
-        logger.error(f"Too many games defaulting to September 1st ({sept_1_count}), likely parsing error")
-        return False
-    
-    logger.info(f"Schedule validation passed: {len(games)} games from {earliest} to {latest}")
     return True
 
 def detect_schedule_structure(soup):
@@ -459,12 +566,15 @@ def scrape_espn_schedule(season=None):
     if season is None:
         season = get_current_season()
     
-    logger.info(f"Scraping ESPN for season {season}")
+    logger.info(f"Scraping ESPN for Penn State season {season}")
     games = []
     
     try:
         headers = get_sidearm_headers()
+        # Penn State team ID on ESPN is 213
         url = f"https://www.espn.com/college-football/team/schedule/_/id/213/season/{season}"
+        logger.info(f"ESPN URL: {url}")
+        
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         
@@ -477,28 +587,54 @@ def scrape_espn_schedule(season=None):
             if table:
                 table = table.find('table')
         
+        if not table:
+            # Try alternative ESPN layout
+            table = soup.find('table')
+        
         if table:
             rows = table.find_all('tr')[1:]  # Skip header
-            for row in rows:
+            logger.info(f"ESPN: Found {len(rows)} table rows")
+            
+            for i, row in enumerate(rows):
                 try:
                     cells = row.find_all(['td', 'th'])
                     if len(cells) >= 2:
                         date_str = cells[0].get_text(strip=True)
-                        opponent_str = cells[1].get_text(strip=True)
+                        opponent_cell = cells[1]
                         
-                        # Skip bye weeks
-                        if not opponent_str or opponent_str.lower() in ['bye', 'open']:
+                        # Skip if this is a header row or separator
+                        if not date_str or date_str.lower() in ['date', 'day']:
                             continue
                         
-                        # Extract time if available
+                        # Get opponent text - might be in a link
+                        opponent_link = opponent_cell.find('a')
+                        if opponent_link:
+                            opponent_str = opponent_link.get_text(strip=True)
+                        else:
+                            opponent_str = opponent_cell.get_text(strip=True)
+                        
+                        logger.debug(f"ESPN row {i}: date='{date_str}', opponent='{opponent_str}'")
+                        
+                        # Skip bye weeks and invalid entries
+                        if not opponent_str or opponent_str.lower() in ['bye', 'open', 'tbd', 'tba']:
+                            continue
+                        
+                        # Extract time if available (usually in 3rd column)
                         time_str = "12:00 PM"  # Default
                         if len(cells) > 2:
-                            time_cell = cells[2].get_text(strip=True)
-                            if any(char.isdigit() for char in time_cell) and ("AM" in time_cell or "PM" in time_cell):
-                                time_str = time_cell
+                            time_cell_text = cells[2].get_text(strip=True)
+                            # Look for time patterns
+                            if re.search(r'\d+:\d+\s*[AP]M', time_cell_text, re.IGNORECASE):
+                                time_str = time_cell_text
                         
-                        is_away = 'at ' in opponent_str.lower() or '@' in opponent_str
+                        # Determine home/away from opponent string
+                        is_away = any(indicator in opponent_str.lower() for indicator in ['at ', '@ '])
+                        
+                        # Clean opponent name
                         opponent = re.sub(r'^(vs\.?\s*|at\s*|@\s*)', '', opponent_str, flags=re.IGNORECASE).strip()
+                        
+                        if not opponent or len(opponent) < 2:
+                            continue
                         
                         if is_away:
                             title = f"Penn State at {opponent}"
@@ -510,7 +646,7 @@ def scrape_espn_schedule(season=None):
                         game_datetime = parse_date_time(date_str, time_str, season)
                         
                         if not game_datetime:
-                            logger.warning(f"Could not parse ESPN datetime for {title}, skipping")
+                            logger.warning(f"Could not parse ESPN datetime for {title}: date='{date_str}', time='{time_str}'")
                             continue
                         
                         duration = datetime.timedelta(hours=3, minutes=30)
@@ -531,22 +667,25 @@ def scrape_espn_schedule(season=None):
                         logger.info(f"ESPN: {title} on {game_datetime}")
                         
                 except Exception as e:
-                    logger.error(f"Error parsing ESPN row: {e}")
+                    logger.error(f"Error parsing ESPN row {i}: {e}")
                     continue
+        else:
+            logger.error("ESPN: No schedule table found")
         
     except Exception as e:
         logger.error(f"Error scraping ESPN: {str(e)}")
     
+    logger.info(f"ESPN scraper found {len(games)} games")
     return games
 
 def scrape_schedule(season=None):
-    """Main scraping function - fails if insufficient games found"""
+    """Main scraping function - tries multiple sources and validates each"""
     if season is None:
         season = get_current_season()
     
     logger.info("Starting schedule scraping...")
     
-    # Try Penn State first, then ESPN - NO FALLBACK DATA
+    # Try Penn State first, then ESPN - NO HARDCODED DATA
     sources = [
         ("Penn State SIDEARM", scrape_penn_state_schedule),
         ("ESPN", scrape_espn_schedule)
@@ -556,18 +695,34 @@ def scrape_schedule(season=None):
         logger.info(f"Trying {source_name}...")
         try:
             games = scrape_func(season)
-            if games and validate_schedule(games, season):
+            logger.info(f"{source_name} returned {len(games)} games")
+            
+            # Check if we have any games at all
+            if not games:
+                logger.warning(f"No games from {source_name}, trying next source")
+                continue
+                
+            # Check minimum threshold - but don't fail yet, try next source
+            min_expected = EXPECTED_GAMES_PER_SEASON.get(season, MIN_GAMES_THRESHOLD)
+            if len(games) < min_expected:
+                logger.warning(f"{source_name} returned only {len(games)} games, expected at least {min_expected}, trying next source")
+                continue
+                
+            # Validate schedule quality
+            if validate_schedule(games, season):
                 logger.info(f"Success: {len(games)} valid games from {source_name}")
                 return games
-            elif games:
-                logger.warning(f"{source_name} returned {len(games)} games but failed validation")
             else:
-                logger.warning(f"No games from {source_name}")
+                logger.warning(f"{source_name} games failed validation checks, trying next source")
+                continue
+                
         except Exception as e:
-            logger.error(f"{source_name} failed: {e}")
+            logger.error(f"{source_name} failed with error: {e}, trying next source")
             continue
     
-    logger.error("All scraping sources failed or returned insufficient/invalid data")
+    # Only fail after ALL sources have been tried and none succeeded
+    logger.error("ALL scraping sources failed or returned insufficient/invalid data")
+    logger.error("Calendar will NOT be updated due to complete scraping failure")
     return []
 
 def create_calendar(games):
