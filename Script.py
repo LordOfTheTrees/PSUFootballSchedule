@@ -93,6 +93,18 @@ def parse_date_time(date_str, time_str="", year=None):
                 except ValueError:
                     logger.error(f"Could not parse numeric date parts: {parts}")
                     return None
+        elif re.match(r'\w+,?\s+\w+\s+\d+', date_str):
+            # Handle ESPN format: "Sat, Aug 30" or "Saturday, August 30"
+            try:
+                from dateutil import parser
+                # Remove day of week and parse the rest
+                date_without_day = re.sub(r'^\w+,?\s+', '', date_str)
+                parsed = parser.parse(f"{date_without_day} {year}")
+                month, day = parsed.month, parsed.day
+                logger.debug(f"ESPN date format parsed: '{date_str}' -> month={month}, day={day}")
+            except Exception as e:
+                logger.error(f"Could not parse ESPN date format '{date_str}': {e}")
+                return None
         elif re.match(r'\w+\s+\d+', date_str):
             # Handle "Sep 20", "September 20" format
             try:
@@ -508,7 +520,7 @@ def scrape_penn_state_schedule(season=None):
     return games
 
 def scrape_espn_schedule(season=None):
-    """ESPN backup scraper with STRICT validation - using correct Penn State URL"""
+    """ESPN backup scraper with STRICT validation - optimized for ESPN table format"""
     if season is None:
         season = get_current_season()
     
@@ -566,83 +578,91 @@ def scrape_espn_schedule(season=None):
                 try:
                     cells = row.find_all(['td', 'th'])
                     if len(cells) >= 2:
+                        # ESPN format: [DATE, OPPONENT, TIME, TV, TICKETS]
                         date_str = cells[0].get_text(strip=True)
                         opponent_cell = cells[1]
                         
+                        logger.debug(f"ESPN row {i}: Raw date='{date_str}'")
+                        
                         # Skip if this is a header row or separator
                         if not date_str or date_str.lower() in ['date', 'day', 'week']:
+                            logger.debug(f"Skipping header/separator row: {date_str}")
                             continue
                         
-                        # Get opponent text - might be in a link
+                        # Get full opponent text including vs/@ indicator
+                        opponent_full_text = opponent_cell.get_text(strip=True)
+                        
+                        # Also try to find opponent in links
                         opponent_link = opponent_cell.find('a')
                         if opponent_link:
-                            opponent_str = opponent_link.get_text(strip=True)
-                        else:
-                            opponent_str = opponent_cell.get_text(strip=True)
+                            linked_opponent = opponent_link.get_text(strip=True)
+                            # Use the linked text if it's longer/more complete
+                            if len(linked_opponent) > len(opponent_full_text.replace('vs ', '').replace('@ ', '')):
+                                opponent_full_text = opponent_full_text.replace(linked_opponent, '').strip() + ' ' + linked_opponent
                         
-                        logger.debug(f"ESPN row {i}: date='{date_str}', opponent='{opponent_str}'")
+                        logger.debug(f"ESPN row {i}: date='{date_str}', opponent_full='{opponent_full_text}'")
                         
                         # STRICT: Skip bye weeks and invalid entries
-                        if not opponent_str or opponent_str.lower() in ['bye', 'open', 'tbd', 'tba']:
-                            logger.debug(f"Skipping invalid ESPN entry: {opponent_str}")
+                        if not opponent_full_text or any(invalid in opponent_full_text.lower() for invalid in ['bye', 'open', 'tbd', 'tba']):
+                            logger.debug(f"Skipping invalid ESPN entry: {opponent_full_text}")
                             continue
                         
-                        # Extract time if available - could be in multiple columns
+                        # Extract time from TIME column (usually column 2)
                         time_str = ""
-                        time_found = False
-                        
-                        # Check cells for time info (usually columns 2-4)
-                        for cell_idx in range(2, min(len(cells), 5)):
-                            cell_text = cells[cell_idx].get_text(strip=True)
-                            # Look for time patterns
-                            if re.search(r'\d+:\d+\s*[AP]M', cell_text, re.IGNORECASE):
-                                time_str = cell_text
-                                time_found = True
-                                break
-                            # Look for "TBA" or "TBD" time indicators
-                            elif cell_text.upper() in ['TBA', 'TBD', 'TIME TBA']:
+                        if len(cells) > 2:
+                            time_cell_text = cells[2].get_text(strip=True)
+                            logger.debug(f"ESPN row {i}: Raw time='{time_cell_text}'")
+                            
+                            # Look for time patterns like "3:30 PM" or "12:00 PM"
+                            if re.search(r'\d+:\d+\s*[AP]M', time_cell_text, re.IGNORECASE):
+                                time_str = time_cell_text
+                            # Handle "TBA" or "TBD" time indicators
+                            elif time_cell_text.upper() in ['TBA', 'TBD', 'TIME TBA']:
                                 time_str = ""  # Will default to 1pm
-                                time_found = True
-                                break
+                            else:
+                                logger.debug(f"Unrecognized time format: '{time_cell_text}', will use 1pm default")
                         
-                        if not time_found:
-                            logger.debug(f"No time found for {opponent_str}, will use 1pm ET default")
+                        # Determine home/away from vs/@ indicator in opponent text
+                        is_away = False
+                        if opponent_full_text.startswith('@'):
+                            is_away = True
+                            # Remove @ symbol
+                            opponent_clean = opponent_full_text[1:].strip()
+                        elif opponent_full_text.startswith('vs'):
+                            is_away = False
+                            # Remove vs prefix
+                            opponent_clean = re.sub(r'^vs\s+', '', opponent_full_text, flags=re.IGNORECASE).strip()
+                        else:
+                            # Fallback: look for @ or vs anywhere in the text
+                            if '@' in opponent_full_text or 'at ' in opponent_full_text.lower():
+                                is_away = True
+                            opponent_clean = re.sub(r'^(vs\.?\s*|@\s*|at\s*)', '', opponent_full_text, flags=re.IGNORECASE).strip()
                         
-                        # Determine home/away from opponent string or other indicators
-                        is_away = any(indicator in opponent_str.lower() for indicator in ['at ', '@ '])
+                        # Remove common ESPN formatting artifacts (rankings, etc.)
+                        opponent_clean = re.sub(r'\s*\(\d+\)\s*', '', opponent_clean)  # Remove rankings like "(5)"
+                        opponent_clean = re.sub(r'\s*#\d+\s*', '', opponent_clean)     # Remove rankings like "#5"
+                        opponent_clean = re.sub(r'^\d+\s+', '', opponent_clean)       # Remove ranking numbers at start
                         
-                        # Also check for home/away indicators in other cells
-                        if not is_away:
-                            for cell in cells:
-                                cell_text = cell.get_text(strip=True).lower()
-                                if any(indicator in cell_text for indicator in ['away', 'at ', '@ ']):
-                                    is_away = True
-                                    break
+                        logger.debug(f"ESPN row {i}: is_away={is_away}, opponent_clean='{opponent_clean}'")
                         
-                        # Clean opponent name
-                        opponent = re.sub(r'^(vs\.?\s*|at\s*|@\s*)', '', opponent_str, flags=re.IGNORECASE).strip()
-                        
-                        # Remove common ESPN formatting artifacts
-                        opponent = re.sub(r'\s*\(\d+\)\s*$', '', opponent)  # Remove rankings like "(5)"
-                        opponent = re.sub(r'\s*#\d+\s*', '', opponent)      # Remove rankings like "#5"
-                        
-                        # STRICT: Must have valid opponent
-                        if not opponent or len(opponent) < 2:
-                            logger.debug(f"Invalid opponent after cleaning: '{opponent}'")
+                        # STRICT: Must have valid opponent after cleaning
+                        if not opponent_clean or len(opponent_clean) < 2:
+                            logger.debug(f"Invalid opponent after cleaning: '{opponent_clean}' from '{opponent_full_text}'")
                             continue
                         
+                        # Build game title and location
                         if is_away:
-                            title = f"Penn State at {opponent}"
+                            title = f"Penn State at {opponent_clean}"
                             location = ""
                         else:
-                            title = f"{opponent} at Penn State"
+                            title = f"{opponent_clean} at Penn State"
                             location = "University Park, Pa.\nBeaver Stadium"
                         
                         # STRICT: Parse datetime - if it fails, skip this game
                         game_datetime = parse_date_time(date_str, time_str, season)
                         
                         if not game_datetime:
-                            logger.warning(f"Could not parse ESPN datetime for {title}, SKIPPING")
+                            logger.warning(f"Could not parse ESPN datetime for {title}: date='{date_str}', time='{time_str}' - SKIPPING")
                             continue
                         
                         duration = datetime.timedelta(hours=3, minutes=30)
@@ -654,16 +674,22 @@ def scrape_espn_schedule(season=None):
                             'location': location,
                             'broadcast': "",
                             'is_home': not is_away,
-                            'opponent': opponent,
+                            'opponent': opponent_clean,
                             'date_str': date_str,
                             'time_str': time_str if time_str else "1:00 PM"  # Show default in logs
                         }
                         
                         games.append(game_info)
-                        logger.info(f"ESPN: Successfully scraped {title} on {game_datetime}")
+                        logger.info(f"ESPN: Successfully scraped {title} on {game_datetime.strftime('%Y-%m-%d %H:%M')}")
                         
                 except Exception as e:
                     logger.error(f"Error parsing ESPN row {i}: {e}")
+                    # Log the row content for debugging
+                    try:
+                        row_text = row.get_text(strip=True)
+                        logger.debug(f"Problematic row content: '{row_text}'")
+                    except:
+                        pass
                     continue
         else:
             logger.error("ESPN: No schedule table found on page")
