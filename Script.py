@@ -60,108 +60,7 @@ def get_sidearm_headers():
         'Referer': 'https://www.google.com/',
     }
 
-def parse_date_time(date_str, time_str=def scrape_penn_state_schedule(season=None):
-    """Modern SIDEARM-aware Penn State schedule scraper with improved error handling"""
-    if season is None:
-        season = get_current_season()
-    
-    logger.info(f"Scraping Penn State schedule for season {season}")
-    games = []
-    
-    try:
-        headers = get_sidearm_headers()
-        session = requests.Session()
-        session.headers.update(headers)
-        
-        # Try the schedule page with multiple approaches
-        base_urls = [
-            f"https://gopsusports.com/sports/football/schedule/{season}",
-            f"https://gopsusports.com/sports/football/schedule",
-            f"https://gopsusports.com/schedule?sport=football&season={season}"
-        ]
-        
-        for url in base_urls:
-            try:
-                logger.info(f"Trying URL: {url}")
-                
-                # Add delay to avoid being flagged as bot
-                time.sleep(2)
-                
-                response = session.get(url, timeout=30)
-                
-                # Check for bot detection or ad blocker messages
-                if ("ad blocker" in response.text.lower() or 
-                    "blocks ads hinders" in response.text.lower() or 
-                    response.status_code == 403):
-                    logger.warning(f"Bot/ad blocker detection triggered for {url}")
-                    continue
-                
-                response.raise_for_status()
-                soup = BeautifulSoup(response.text, 'html.parser')
-                
-                # Dynamically detect schedule structure
-                container, game_selector = detect_schedule_structure(soup)
-                
-                if not container:
-                    logger.warning(f"No schedule structure found on {url}")
-                    continue
-                
-                # Extract games using detected structure
-                game_elements = container.select(game_selector)
-                logger.info(f"Found {len(game_elements)} potential game elements")
-                
-                for game_elem in game_elements:
-                    game_data = extract_game_data(game_elem)
-                    
-                    if not game_data or not game_data['opponent']:
-                        continue
-                    
-                    # Create game info
-                    opponent = game_data['opponent']
-                    is_home = game_data['is_home']
-                    
-                    if is_home:
-                        title = f"{opponent} at Penn State"
-                        location = "University Park, Pa.\nBeaver Stadium"
-                    else:
-                        title = f"Penn State at {opponent}"
-                        location = ""
-                    
-                    game_datetime = parse_date_time(game_data['date_str'], game_data['time_str'], season)
-                    
-                    if not game_datetime:
-                        logger.warning(f"Could not parse datetime for {title}, skipping")
-                        continue
-                    
-                    duration = datetime.timedelta(hours=3, minutes=30)
-                    
-                    game_info = {
-                        'title': title,
-                        'start': game_datetime,
-                        'end': game_datetime + duration,
-                        'location': location,
-                        'broadcast': "",
-                        'is_home': is_home,
-                        'opponent': opponent,
-                        'date_str': game_data['date_str'],
-                        'time_str': game_data['time_str']
-                    }
-                    
-                    games.append(game_info)
-                    logger.info(f"Scraped: {title} on {game_datetime}")
-                
-                if games:
-                    logger.info(f"Successfully scraped {len(games)} games from {url}")
-                    return games
-                    
-            except Exception as e:
-                logger.error(f"Error with {url}: {e}")
-                continue
-        
-    except Exception as e:
-        logger.error(f"Error scraping Penn State schedule: {str(e)}")
-    
-    return games, year=None):
+def parse_date_time(date_str, time_str="", year=None):
     """Improved date/time parsing with better fallbacks"""
     try:
         if year is None:
@@ -281,6 +180,109 @@ def parse_date_time(date_str, time_str=def scrape_penn_state_schedule(season=Non
     except Exception as e:
         logger.error(f"Error parsing date/time: {date_str}, {time_str} - {str(e)}")
         return None
+
+def scrape_penn_state_schedule(season=None):
+    """Modern SIDEARM-aware Penn State schedule scraper with improved error handling"""
+    if season is None:
+        season = get_current_season()
+    
+    logger.info(f"Scraping Penn State schedule for season {season}")
+    games = []
+    
+    try:
+        headers = get_sidearm_headers()
+        session = requests.Session()
+        session.headers.update(headers)
+        
+        # Try the schedule page with multiple approaches
+        base_urls = [
+            f"https://gopsusports.com/sports/football/schedule/{season}",
+            f"https://gopsusports.com/sports/football/schedule",
+            f"https://gopsusports.com/schedule?sport=football&season={season}"
+        ]
+        
+        for url in base_urls:
+            try:
+                logger.info(f"Trying URL: {url}")
+                
+                # Add delay to avoid being flagged as bot
+                time.sleep(2)
+                
+                response = session.get(url, timeout=30)
+                
+                # Check for bot detection or ad blocker messages
+                if ("ad blocker" in response.text.lower() or 
+                    "blocks ads hinders" in response.text.lower() or 
+                    response.status_code == 403):
+                    logger.warning(f"Bot/ad blocker detection triggered for {url}")
+                    continue
+                
+                response.raise_for_status()
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Dynamically detect schedule structure
+                container, game_selector = detect_schedule_structure(soup)
+                
+                if not container:
+                    logger.warning(f"No schedule structure found on {url}")
+                    continue
+                
+                # Extract games using detected structure
+                game_elements = container.select(game_selector)
+                logger.info(f"Found {len(game_elements)} potential game elements")
+                
+                for game_elem in game_elements:
+                    game_data = extract_game_data(game_elem)
+                    
+                    if not game_data or not game_data['opponent']:
+                        continue
+                    
+                    # Create game info
+                    opponent = game_data['opponent']
+                    is_home = game_data['is_home']
+                    
+                    if is_home:
+                        title = f"{opponent} at Penn State"
+                        location = "University Park, Pa.\nBeaver Stadium"
+                    else:
+                        title = f"Penn State at {opponent}"
+                        location = ""
+                    
+                    game_datetime = parse_date_time(game_data['date_str'], game_data['time_str'], season)
+                    
+                    if not game_datetime:
+                        logger.warning(f"Could not parse datetime for {title}, skipping")
+                        continue
+                    
+                    duration = datetime.timedelta(hours=3, minutes=30)
+                    
+                    game_info = {
+                        'title': title,
+                        'start': game_datetime,
+                        'end': game_datetime + duration,
+                        'location': location,
+                        'broadcast': "",
+                        'is_home': is_home,
+                        'opponent': opponent,
+                        'date_str': game_data['date_str'],
+                        'time_str': game_data['time_str']
+                    }
+                    
+                    games.append(game_info)
+                    logger.info(f"Scraped: {title} on {game_datetime}")
+                
+                if games:
+                    logger.info(f"Successfully scraped {len(games)} games from {url}")
+                    return games
+                    
+            except Exception as e:
+                logger.error(f"Error with {url}: {e}")
+                continue
+        
+    except Exception as e:
+        logger.error(f"Error scraping Penn State schedule: {str(e)}")
+    
+    return games
 
 def validate_schedule(games, season):
     """Validate that the scraped schedule looks reasonable"""
