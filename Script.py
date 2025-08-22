@@ -7,6 +7,7 @@ import time
 import os
 import re
 import logging
+import pytz
 
 # Configure logging
 logging.basicConfig(
@@ -17,6 +18,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 CALENDAR_FILE = "penn_state_football.ics"
+
+# Eastern Time zone for proper time conversion
+EASTERN_TZ = pytz.timezone('US/Eastern')
+UTC_TZ = pytz.UTC
 
 # Expected number of games per season for validation
 EXPECTED_GAMES_PER_SEASON = {
@@ -201,14 +206,15 @@ def parse_date_time(date_str, time_str="", year=None):
         
         # Validate the date
         try:
-            result = datetime.datetime(year, month, day, hour, minute)
+            # Create timezone-aware datetime in Eastern Time
+            result = EASTERN_TZ.localize(datetime.datetime(year, month, day, hour, minute))
             
             # Additional validation: check if date is reasonable for football season
             if result.month < 8 or result.month > 12:
                 logger.warning(f"Date outside typical football season: {result}")
                 # Still allow it, but log warning
             
-            logger.debug(f"Successfully parsed: {result}")
+            logger.debug(f"Successfully parsed as Eastern Time: {result}")
             return result
         except ValueError as e:
             logger.error(f"Invalid date/time values: year={year}, month={month}, day={day}, hour={hour}, minute={minute} - {e}")
@@ -493,8 +499,8 @@ def scrape_penn_state_schedule(season=None):
                     
                     game_info = {
                         'title': title,
-                        'start': game_datetime,
-                        'end': game_datetime + duration,
+                        'start': game_datetime,  # Already timezone-aware in Eastern Time
+                        'end': game_datetime + duration,  # This will also be timezone-aware
                         'location': location,
                         'broadcast': "",
                         'is_home': is_home,
@@ -669,8 +675,8 @@ def scrape_espn_schedule(season=None):
                         
                         game_info = {
                             'title': title,
-                            'start': game_datetime,
-                            'end': game_datetime + duration,
+                            'start': game_datetime,  # Already timezone-aware in Eastern Time
+                            'end': game_datetime + duration,  # This will also be timezone-aware
                             'location': location,
                             'broadcast': "",
                             'is_home': not is_away,
@@ -747,7 +753,7 @@ def scrape_schedule(season=None):
     return []
 
 def create_calendar(games):
-    """Create iCalendar file - empty if no games provided"""
+    """Create iCalendar file with timezone-aware events - empty if no games provided"""
     cal = Calendar()
     cal._prodid = "Penn State Football Schedule"
     
@@ -761,8 +767,11 @@ def create_calendar(games):
     for game in games:
         event = Event()
         event.name = game['title']
-        event.begin = game['start']
-        event.end = game['end']
+        
+        # Events are already timezone-aware in Eastern Time from parse_date_time()
+        event.begin = game['start']  # ics library will handle timezone conversion properly
+        event.end = game['end']      # ics library will handle timezone conversion properly
+        
         event.location = game['location']
         
         description = ""
@@ -771,14 +780,25 @@ def create_calendar(games):
         description += "Home Game" if game['is_home'] else "Away Game"
         if game['opponent']:
             description += f"\nOpponent: {game['opponent']}"
+        
+        # Add timezone info to description for clarity
+        timezone_info = game['start'].strftime('%Z %z') if hasattr(game['start'], 'strftime') else "ET"
+        description += f"\nTime Zone: {timezone_info}"
             
         event.description = description
         cal.events.add(event)
     
     with open(CALENDAR_FILE, 'w') as f:
-        f.write(cal.serialize())
+        calendar_content = cal.serialize()
+        f.write(calendar_content)
     
-    logger.info(f"Calendar created with {len(games)} events")
+    logger.info(f"Calendar created with {len(games)} timezone-aware events")
+    
+    # Log first event details for verification
+    if games:
+        first_game = games[0]
+        logger.info(f"First event: {first_game['title']} at {first_game['start']} ({first_game['start'].tzinfo})")
+    
     return cal
 
 def update_calendar(custom_season=None):
