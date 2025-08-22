@@ -2,7 +2,7 @@ name: Update Penn State Football Calendar
 
 on:
   schedule:
-    # Run at 2am ET (6am UTC) for better coverage
+    # Run at 2am ET (6am UTC)
     - cron: '0 6 * * *'
   workflow_dispatch:  # Allow manual trigger through GitHub UI
 
