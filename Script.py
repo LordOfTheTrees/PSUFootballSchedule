@@ -7,6 +7,7 @@ import time
 import os
 import re
 import logging
+from zoneinfo import ZoneInfo
 
 # Configure logging
 logging.basicConfig(
@@ -18,10 +19,6 @@ logger = logging.getLogger(__name__)
 
 CALENDAR_FILE = "penn_state_football.ics"
 
-# Eastern Time zone for proper time conversion (UTC-5 standard, UTC-4 daylight)
-# Using built-in datetime.timezone
-EASTERN_TZ = datetime.timezone(datetime.timedelta(hours=-5), "EST")
-EASTERN_DAYLIGHT_TZ = datetime.timezone(datetime.timedelta(hours=-4), "EDT")
 
 # Expected number of games per season for validation
 EXPECTED_GAMES_PER_SEASON = {
@@ -207,13 +204,9 @@ def parse_date_time(date_str, time_str="", year=None):
         # Validate the date
         try:
             # Create timezone-aware datetime in Eastern Time
-            # Determine if it's daylight saving time (March - November roughly)
-            if month >= 3 and month <= 11:
-                tz = EASTERN_DAYLIGHT_TZ  # EDT (UTC-4)
-            else:
-                tz = EASTERN_TZ  # EST (UTC-5)
-            
-            result = datetime.datetime(year, month, day, hour, minute, tzinfo=tz)
+            # ZoneInfo automatically handles DST transitions
+            eastern_tz = ZoneInfo("America/New_York")
+            result = datetime.datetime(year, month, day, hour, minute, tzinfo=eastern_tz)
             
             # Additional validation: check if date is reasonable for football season
             if result.month < 8 or result.month > 12:
