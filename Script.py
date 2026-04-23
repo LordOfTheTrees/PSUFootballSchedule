@@ -22,6 +22,7 @@ CALENDAR_FILE = "penn_state_football.ics"
 
 # Expected number of games per season for validation
 EXPECTED_GAMES_PER_SEASON = {
+    2026: 12,
     2025: 12,  # Penn State typically plays 12 games (12 regular season + potential bowl)
     2024: 12,
     2023: 12,
@@ -69,6 +70,15 @@ def parse_date_time(date_str, time_str="", year=None):
         date_str = date_str.strip() if date_str else ""
         time_str = time_str.strip() if time_str else ""
         
+        # gopsusports.com SIDEARM sometimes omits space: "SaturdayApr 25"
+        date_str = re.sub(
+            r"(?i)(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)"
+            r"(January|February|March|April|May|June|July|August|September|October|November|December|"
+            r"Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b",
+            r"\1 \2",
+            date_str,
+        )
+        
         # STRICT REQUIREMENT: Must have actual date string
         if not date_str or date_str.upper() in ["TBA", "TBD", "TIME TBA", ""]:
             logger.warning(f"No valid date string provided: '{date_str}'")
@@ -79,9 +89,9 @@ def parse_date_time(date_str, time_str="", year=None):
         # Handle various date formats
         month, day = None, None
         
-        if "/" in date_str:
-            # Format: MM/DD or MM/DD/YY
-            parts = date_str.split("/")
+        if "/" in date_str and re.match(r"^\s*\d{1,2}\s*/\s*\d{1,2}", date_str):
+            # Format: MM/DD or MM/DD/YY (avoid "MST) / 2:00 PM (EST)" style SIDEARM strings)
+            parts = [p.strip() for p in date_str.split("/")]
             if len(parts) >= 2:
                 try:
                     month = int(parts[0])
@@ -168,6 +178,30 @@ def parse_date_time(date_str, time_str="", year=None):
         # Parse time - default to 1pm ET if no time provided
         hour, minute = 13, 0  # Default to 1pm ET for college football
         
+        # SIDEARM sometimes puts a bare day-of-month in a "time" slot (e.g. "26" from Sep 26)
+        if time_str and re.fullmatch(r"\d{1,2}", time_str.strip()):
+            n = int(time_str.strip())
+            if 1 <= n <= 31:
+                logger.debug(f"Ignoring time_str that looks like day-of-month: '{time_str}'")
+                time_str = ""
+        
+        # Or the "time" cell duplicates the date line (e.g. "SaturdayApr 25") with no clock
+        time_str = re.sub(
+            r"(?i)(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)"
+            r"(January|February|March|April|May|June|July|August|September|October|November|December|"
+            r"Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b",
+            r"\1 \2",
+            time_str,
+        )
+        if time_str and re.search(
+            r"(?i)(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s+"
+            r"(January|February|March|April|May|June|July|August|September|October|November|December|"
+            r"Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)",
+            time_str,
+        ) and not re.search(r"\d{1,2}\s*[AP]M", time_str, re.I):
+            logger.debug(f"Ignoring time_str that is date text, not a time: '{time_str}'")
+            time_str = ""
+        
         if time_str and time_str.upper() not in ["TBA", "TBD", "", "TIME TBA"]:
             is_pm = "PM" in time_str.upper()
             is_am = "AM" in time_str.upper()
@@ -200,6 +234,12 @@ def parse_date_time(date_str, time_str="", year=None):
                 hour += 12
         else:
             logger.debug(f"No valid time found for {date_str}, using 1pm ET default")
+        
+        if hour > 23 or hour < 0 or minute > 59 or minute < 0:
+            logger.warning(
+                f"Invalid clock from time '{time_str}' (hour={hour}, minute={minute}), using 1pm ET default"
+            )
+            hour, minute = 13, 0
         
         # Validate the date
         try:
@@ -434,9 +474,9 @@ def scrape_penn_state_schedule(season=None):
         
         # Try the schedule page with multiple approaches
         base_urls = [
+            "https://gopsusports.com/sports/football/schedule",
             f"https://gopsusports.com/sports/football/schedule/{season}",
-            f"https://gopsusports.com/sports/football/schedule",
-            f"https://gopsusports.com/schedule?sport=football&season={season}"
+            f"https://gopsusports.com/schedule?sport=football&season={season}",
         ]
         
         for url in base_urls:
@@ -448,10 +488,18 @@ def scrape_penn_state_schedule(season=None):
                 
                 response = session.get(url, timeout=30)
                 
-                # Check for bot detection or ad blocker messages
-                if ("ad blocker" in response.text.lower() or 
-                    "blocks ads hinders" in response.text.lower() or 
-                    response.status_code == 403):
+                response_text_lower = response.text.lower()
+                # SIDEARM includes a hidden "Ad Blocker Detected" modal in normal pages; only
+                # treat ad-blocker copy as a wall when schedule markup is missing.
+                has_schedule_markup = (
+                    "sidearm-schedule-games" in response_text_lower
+                    or "sidearm-schedule-game" in response_text_lower
+                )
+                adblock_wall_copy = (
+                    "ad blocker" in response_text_lower
+                    or "blocks ads hinders" in response_text_lower
+                )
+                if response.status_code == 403 or (adblock_wall_copy and not has_schedule_markup):
                     logger.warning(f"Bot/ad blocker detection triggered for {url}")
                     continue
                 
@@ -544,6 +592,17 @@ def scrape_espn_schedule(season=None):
         logger.info(f"ESPN URL: {url}")
         
         response = requests.get(url, headers=headers, timeout=30)
+        
+        response_text_lower = response.text.lower()
+        if response.status_code == 202 or (
+            "awswaf" in response_text_lower and "challenge-container" in response_text_lower
+        ):
+            logger.warning(
+                "ESPN returned an AWS WAF challenge page instead of schedule HTML "
+                "(plain requests often cannot complete the challenge; rely on SIDEARM or use curl_cffi / a browser)"
+            )
+            return games
+        
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
