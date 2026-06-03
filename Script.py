@@ -316,41 +316,47 @@ def validate_schedule(games, season):
 def detect_schedule_structure(soup):
     """Dynamically detect the schedule structure on SIDEARM pages"""
     logger.info("Analyzing page structure for schedule data...")
-    
+
     # Look for common SIDEARM schedule patterns
     possible_containers = [
-        # Modern SIDEARM selectors
+        # Modern SIDEARM selectors (BEM naming used since ~2023)
+        '.sidearm-schedule-games-container',
+        'ul.sidearm-schedule-games-container',
+        # Older SIDEARM selectors
         '.sidearm-schedule-games',
-        '.sidearm-schedule-games-container', 
         '.schedule-list',
         '.game-list',
         '.event-listing',
-        
+
         # Table-based layouts
         'table.sidearm-table',
         'table.schedule',
         'table.schedule-table',
         '.ResponsiveTable table',
-        
+
         # Card/item based layouts
         '.schedule-game',
         '.game-card',
         '.event-card',
         '.schedule-item',
-        
+
         # Generic containers that might hold games
         '[data-module*="schedule"]',
         '[id*="schedule"]',
         '[class*="schedule"]'
     ]
-    
+
     for selector in possible_containers:
         container = soup.select_one(selector)
         if container:
             # Look for individual game items within this container
             game_selectors = [
+                # BEM variant used by current SIDEARM platform
+                '.sidearm-schedule-games-container__game',
+                'li.sidearm-schedule-games-container__game',
+                # Legacy SIDEARM selectors
                 '.sidearm-schedule-game',
-                '.schedule-game', 
+                '.schedule-game',
                 '.game-item',
                 '.event-item',
                 'tr',  # Table rows
@@ -359,13 +365,13 @@ def detect_schedule_structure(soup):
                 '[data-game]',
                 '[class*="game"]'
             ]
-            
+
             for game_sel in game_selectors:
                 games = container.select(game_sel)
                 if len(games) > 3:  # Must have several games to be valid
                     logger.info(f"Found schedule structure: {selector} -> {game_sel} ({len(games)} items)")
                     return container, game_sel
-    
+
     logger.warning("Could not detect schedule structure")
     return None, None
 
@@ -767,6 +773,119 @@ def scrape_espn_schedule(season=None):
     logger.info(f"ESPN scraper found {len(games)} games")
     return games
 
+def scrape_espn_api(season=None):
+    """
+    Use ESPN's public schedule API — returns clean JSON, bypasses HTML/JS rendering issues.
+    Endpoint: site.api.espn.com/apis/site/v2/sports/football/college-football/teams/213/schedule
+    """
+    if season is None:
+        season = get_current_season()
+
+    logger.info(f"Trying ESPN API for season {season}")
+    games = []
+
+    try:
+        url = (
+            f"https://site.api.espn.com/apis/site/v2/sports/football/"
+            f"college-football/teams/213/schedule?season={season}"
+        )
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json',
+        }
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+
+        events = data.get('events', [])
+        logger.info(f"ESPN API returned {len(events)} events")
+
+        eastern_tz = ZoneInfo("America/New_York")
+
+        for event in events:
+            try:
+                competition = event.get('competitions', [{}])[0]
+                competitors = competition.get('competitors', [])
+
+                psu_comp = None
+                opp_comp = None
+                for comp in competitors:
+                    name = comp.get('team', {}).get('displayName', '').lower()
+                    if 'penn state' in name:
+                        psu_comp = comp
+                    else:
+                        opp_comp = comp
+
+                if not opp_comp:
+                    continue
+
+                opponent = (
+                    opp_comp.get('team', {}).get('displayName', '')
+                    or opp_comp.get('team', {}).get('shortDisplayName', '')
+                )
+                if not opponent:
+                    continue
+
+                is_home = (psu_comp or {}).get('homeAway') == 'home'
+
+                # ISO date from API, e.g. "2026-09-05T19:30:00Z"
+                date_str = event.get('date', competition.get('date', ''))
+                if not date_str:
+                    continue
+
+                dt_utc = datetime.datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                # When timeValid is False ESPN sends midnight UTC — use 1pm ET default instead
+                time_valid = competition.get('timeValid', True)
+                if not time_valid:
+                    date_et = dt_utc.astimezone(eastern_tz).date()
+                    game_datetime = datetime.datetime(date_et.year, date_et.month, date_et.day, 13, 0, tzinfo=eastern_tz)
+                else:
+                    game_datetime = dt_utc.astimezone(eastern_tz)
+
+                venue = competition.get('venue', {})
+                venue_name = venue.get('fullName', '')
+                venue_city = venue.get('address', {}).get('city', '')
+                venue_state = venue.get('address', {}).get('state', '')
+                location = ''
+                if venue_name:
+                    location = f"{venue_name}, {venue_city}, {venue_state}".strip(', ')
+
+                broadcasts = competition.get('broadcasts', [])
+                broadcast = broadcasts[0].get('names', [''])[0] if broadcasts else ''
+
+                if is_home:
+                    title = f"{opponent} at Penn State"
+                    if not location:
+                        location = "University Park, Pa.\nBeaver Stadium"
+                else:
+                    title = f"Penn State at {opponent}"
+
+                duration = datetime.timedelta(hours=3, minutes=30)
+                game_info = {
+                    'title': title,
+                    'start': game_datetime,
+                    'end': game_datetime + duration,
+                    'location': location,
+                    'broadcast': broadcast,
+                    'is_home': is_home,
+                    'opponent': opponent,
+                    'date_str': date_str,
+                    'time_str': game_datetime.strftime('%I:%M %p %Z'),
+                }
+                games.append(game_info)
+                logger.info(f"ESPN API: {title} on {game_datetime.strftime('%Y-%m-%d %H:%M %Z')}")
+
+            except Exception as e:
+                logger.error(f"Error parsing ESPN API event: {e}")
+                continue
+
+    except Exception as e:
+        logger.error(f"ESPN API error: {e}")
+
+    logger.info(f"ESPN API scraper found {len(games)} games")
+    return games
+
+
 def scrape_schedule(season=None):
     """
     Main scraping function - STRICT validation, empty calendar if failed
@@ -776,10 +895,11 @@ def scrape_schedule(season=None):
     
     logger.info("Starting STRICT schedule scraping...")
     
-    # Try Penn State first, then ESPN
+    # ESPN API is most reliable (clean JSON, no scraping); SIDEARM and ESPN HTML as fallbacks
     sources = [
+        ("ESPN API", scrape_espn_api),
         ("Penn State SIDEARM", scrape_penn_state_schedule),
-        ("ESPN", scrape_espn_schedule)
+        ("ESPN HTML", scrape_espn_schedule),
     ]
     
     for source_name, scrape_func in sources:
