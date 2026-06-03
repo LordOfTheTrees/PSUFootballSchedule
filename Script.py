@@ -372,6 +372,17 @@ def detect_schedule_structure(soup):
                     logger.info(f"Found schedule structure: {selector} -> {game_sel} ({len(games)} items)")
                     return container, game_sel
 
+    # Emit diagnostic info so we know what's actually in the page
+    all_classes = set()
+    for tag in soup.find_all(True):
+        for c in (tag.get('class') or []):
+            all_classes.add(c)
+    sched_classes = sorted(c for c in all_classes if any(
+        kw in c.lower() for kw in ('sched', 'game', 'event', 'sport', 'match', 'fixture', 'season')
+    ))
+    logger.warning(f"SIDEARM: schedule-related classes found: {sched_classes[:60]}")
+    # Also log a snippet of raw HTML for deeper inspection
+    logger.warning(f"SIDEARM: page HTML snippet (first 2000 chars): {str(soup)[:2000]}")
     logger.warning("Could not detect schedule structure")
     return None, None
 
@@ -785,20 +796,35 @@ def scrape_espn_api(season=None):
     games = []
 
     try:
-        url = (
-            f"https://site.api.espn.com/apis/site/v2/sports/football/"
-            f"college-football/teams/213/schedule?season={season}"
-        )
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'application/json',
         }
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        data = response.json()
+        # Try seasontype=2 (regular season) explicitly; some years need it
+        urls_to_try = [
+            f"https://site.api.espn.com/apis/site/v2/sports/football/college-football/teams/213/schedule?season={season}&seasontype=2",
+            f"https://site.api.espn.com/apis/site/v2/sports/football/college-football/teams/213/schedule?season={season}",
+        ]
+        data = None
+        for api_url in urls_to_try:
+            logger.info(f"ESPN API url: {api_url}")
+            response = requests.get(api_url, headers=headers, timeout=30)
+            response.raise_for_status()
+            candidate = response.json()
+            if candidate.get('events'):
+                data = candidate
+                break
+            logger.warning(f"No events at {api_url}, keys: {list(candidate.keys())}")
+            logger.warning(f"Response preview: {str(candidate)[:500]}")
+        if data is None:
+            data = candidate  # last attempt, will log 0 events below
 
         events = data.get('events', [])
         logger.info(f"ESPN API returned {len(events)} events")
+        if not events:
+            # Log the full top-level structure so we can diagnose a schema change
+            logger.warning(f"ESPN API top-level keys: {list(data.keys())}")
+            logger.warning(f"ESPN API response preview: {str(data)[:1000]}")
 
         eastern_tz = ZoneInfo("America/New_York")
 
@@ -886,6 +912,120 @@ def scrape_espn_api(season=None):
     return games
 
 
+def scrape_sports_reference(season=None):
+    """
+    Sports Reference (sports-reference.com) fallback.
+    Serves static server-side HTML with a parseable table — no JS required.
+    Table id="schedule", columns: Wk, Date, Time, Day, School, (home/away blank), Opponent, ...
+    """
+    if season is None:
+        season = get_current_season()
+
+    logger.info(f"Trying Sports Reference for season {season}")
+    games = []
+
+    try:
+        url = f"https://www.sports-reference.com/cfb/schools/penn-state/{season}-schedule.html"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+        }
+        # Sports Reference requires a small delay to avoid rate-limiting
+        time.sleep(3)
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+        table = soup.find('table', id='schedule')
+        if not table:
+            logger.warning("Sports Reference: no table#schedule found")
+            return games
+
+        # Find header row to map column indices
+        header_row = table.find('thead')
+        col_names = []
+        if header_row:
+            col_names = [th.get_text(strip=True).lower() for th in header_row.find_all('th')]
+        logger.info(f"Sports Reference columns: {col_names}")
+
+        # Map column indices
+        def col_idx(name):
+            for i, c in enumerate(col_names):
+                if name in c:
+                    return i
+            return None
+
+        date_idx = col_idx('date') or 1
+        time_idx = col_idx('time') if col_idx('time') is not None else 2
+        home_away_idx = None  # blank cell = home, "at" = away; typically col 5
+        opponent_idx = col_idx('opponent') if col_idx('opponent') is not None else 6
+
+        eastern_tz = ZoneInfo("America/New_York")
+        rows = table.find('tbody').find_all('tr') if table.find('tbody') else []
+        logger.info(f"Sports Reference: {len(rows)} rows")
+
+        for row in rows:
+            if row.get('class') and 'thead' in row.get('class', []):
+                continue  # skip mid-table header rows
+
+            cells = row.find_all(['td', 'th'])
+            if len(cells) < max(date_idx, opponent_idx) + 1:
+                continue
+
+            date_text = cells[date_idx].get_text(strip=True)
+            if not date_text or not any(c.isdigit() for c in date_text):
+                continue
+
+            # Opponent cell
+            opp_cell = cells[opponent_idx]
+            opponent = opp_cell.get_text(strip=True)
+            if not opponent or opponent.lower() in ('tba', 'tbd', 'bye'):
+                continue
+
+            # Home/away: look for an "at" cell between school and opponent (usually col 5)
+            is_away = False
+            for cell in cells:
+                if cell.get_text(strip=True).lower() in ('@', 'at'):
+                    is_away = True
+                    break
+
+            # Time
+            time_text = cells[time_idx].get_text(strip=True) if time_idx < len(cells) else ""
+
+            game_datetime = parse_date_time(date_text, time_text, season)
+            if not game_datetime:
+                logger.warning(f"Sports Reference: could not parse date '{date_text}' for {opponent}")
+                continue
+
+            if is_away:
+                title = f"Penn State at {opponent}"
+                location = ""
+            else:
+                title = f"{opponent} at Penn State"
+                location = "University Park, Pa.\nBeaver Stadium"
+
+            duration = datetime.timedelta(hours=3, minutes=30)
+            games.append({
+                'title': title,
+                'start': game_datetime,
+                'end': game_datetime + duration,
+                'location': location,
+                'broadcast': '',
+                'is_home': not is_away,
+                'opponent': opponent,
+                'date_str': date_text,
+                'time_str': time_text,
+            })
+            logger.info(f"Sports Reference: {title} on {game_datetime.strftime('%Y-%m-%d %H:%M %Z')}")
+
+    except Exception as e:
+        logger.error(f"Sports Reference error: {e}")
+
+    logger.info(f"Sports Reference scraper found {len(games)} games")
+    return games
+
+
 def scrape_schedule(season=None):
     """
     Main scraping function - STRICT validation, empty calendar if failed
@@ -895,10 +1035,11 @@ def scrape_schedule(season=None):
     
     logger.info("Starting STRICT schedule scraping...")
     
-    # ESPN API is most reliable (clean JSON, no scraping); SIDEARM and ESPN HTML as fallbacks
+    # Try sources in order of reliability
     sources = [
         ("ESPN API", scrape_espn_api),
         ("Penn State SIDEARM", scrape_penn_state_schedule),
+        ("Sports Reference", scrape_sports_reference),
         ("ESPN HTML", scrape_espn_schedule),
     ]
     
