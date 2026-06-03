@@ -313,165 +313,155 @@ def validate_schedule(games, season):
     
     return True
 
-def detect_schedule_structure(soup):
-    """Dynamically detect the schedule structure on SIDEARM pages"""
-    logger.info("Analyzing page structure for schedule data...")
+_DATE_RE = re.compile(
+    r'\b((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|'
+    r'Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)'
+    r'\s+\d{1,2})\b',
+    re.I,
+)
+_TIME_RE = re.compile(r'\b(\d{1,2}:\d{2}\s*[AP]M)\b', re.I)
 
-    # Look for common SIDEARM schedule patterns
-    possible_containers = [
-        # Modern SIDEARM selectors (BEM naming used since ~2023)
-        '.sidearm-schedule-games-container',
-        'ul.sidearm-schedule-games-container',
-        # Older SIDEARM selectors
-        '.sidearm-schedule-games',
-        '.schedule-list',
-        '.game-list',
-        '.event-listing',
 
-        # Table-based layouts
-        'table.sidearm-table',
-        'table.schedule',
-        'table.schedule-table',
-        '.ResponsiveTable table',
-
-        # Card/item based layouts
-        '.schedule-game',
-        '.game-card',
-        '.event-card',
-        '.schedule-item',
-
-        # Generic containers that might hold games
-        '[data-module*="schedule"]',
-        '[id*="schedule"]',
-        '[class*="schedule"]'
-    ]
-
-    for selector in possible_containers:
-        container = soup.select_one(selector)
-        if container:
-            # Look for individual game items within this container
-            game_selectors = [
-                # BEM variant used by current SIDEARM platform
-                '.sidearm-schedule-games-container__game',
-                'li.sidearm-schedule-games-container__game',
-                # Legacy SIDEARM selectors
-                '.sidearm-schedule-game',
-                '.schedule-game',
-                '.game-item',
-                '.event-item',
-                'tr',  # Table rows
-                '.game',
-                '.event',
-                '[data-game]',
-                '[class*="game"]'
-            ]
-
-            for game_sel in game_selectors:
-                games = container.select(game_sel)
-                if len(games) > 3:  # Must have several games to be valid
-                    logger.info(f"Found schedule structure: {selector} -> {game_sel} ({len(games)} items)")
-                    return container, game_sel
-
-    # Emit diagnostic info so we know what's actually in the page
-    all_classes = set()
-    for tag in soup.find_all(True):
-        for c in (tag.get('class') or []):
-            all_classes.add(c)
-    sched_classes = sorted(c for c in all_classes if any(
-        kw in c.lower() for kw in ('sched', 'game', 'event', 'sport', 'match', 'fixture', 'season')
-    ))
-    logger.warning(f"SIDEARM: schedule-related classes found: {sched_classes[:60]}")
-    # Also log a snippet of raw HTML for deeper inspection
-    logger.warning(f"SIDEARM: page HTML snippet (first 2000 chars): {str(soup)[:2000]}")
-    logger.warning("Could not detect schedule structure")
-    return None, None
-
-def extract_game_data(game_element):
+def find_game_elements(soup):
     """
-    STRICT extraction - returns None if cannot find opponent and date
+    Detect game elements by structural repetition + date content.
+    Looks for any repeated li/div/article that recurs 6-18 times and
+    contains a month+day pattern — no class names assumed.
+    """
+    from collections import Counter
+
+    counts = Counter()
+    by_key = {}
+    for elem in soup.find_all(['li', 'div', 'article', 'section']):
+        # Skip oversized containers (full page wrappers)
+        text = elem.get_text()
+        if len(text) > 3000:
+            continue
+        key = (elem.name, ' '.join(sorted(elem.get('class', []))))
+        counts[key] += 1
+        by_key.setdefault(key, []).append(elem)
+
+    best, best_score = [], 0
+    for key, count in counts.items():
+        if not (6 <= count <= 18):
+            continue
+        elems = by_key[key]
+        dated = [e for e in elems if _DATE_RE.search(e.get_text())]
+        if len(dated) >= 6 and len(dated) > best_score:
+            best_score = len(dated)
+            best = dated
+
+    if best:
+        logger.info(f"Content detection: {len(best)} game elements "
+                    f"(tag={best[0].name}, class='{best[0].get('class', []).__str__()}')")
+    else:
+        logger.warning("Content detection: no repeating date-bearing elements found")
+        # Diagnostic: log classes that look schedule-related
+        all_cls = set(c for t in soup.find_all(True) for c in (t.get('class') or []))
+        rel = sorted(c for c in all_cls if any(
+            k in c.lower() for k in ('sched', 'game', 'event', 'sport', 'match', 'season')))
+        logger.warning(f"Schedule-related classes present: {rel[:60]}")
+
+    return best
+
+
+def extract_game_data(elem):
+    """
+    Extract date, time, opponent and home/away from a game element.
+    Tries known SIDEARM field classes first, then falls back to regex
+    over the element's full text — so it works regardless of class names.
     """
     try:
-        # Try multiple strategies to extract date
+        text = elem.get_text(' ', strip=True)
+
+        # --- Date ---
         date_str = ""
-        date_selectors = [
-            '.date', '.game-date', '.event-date', '.schedule-date',
-            '.sidearm-schedule-game-opponent-date',
-            '[class*="date"]', 'time', '.datetime',
-            'td:first-child', '.first-col'
-        ]
-        
-        for sel in date_selectors:
-            date_elem = game_element.select_one(sel)
-            if date_elem:
-                date_str = date_elem.get_text(strip=True)
-                if date_str and any(char.isdigit() for char in date_str):
+        for sel in ('.sidearm-schedule-game-opponent-date', '[class*="date"]', 'time'):
+            el = elem.select_one(sel)
+            if el:
+                m = _DATE_RE.search(el.get_text())
+                if m:
+                    date_str = m.group(1)
                     break
-        
-        # Try multiple strategies to extract time
+        if not date_str:
+            m = _DATE_RE.search(text)
+            if m:
+                date_str = m.group(1)
+        if not date_str:
+            return None
+
+        # --- Time ---
         time_str = ""
-        time_selectors = [
-            '.time', '.game-time', '.event-time', '.schedule-time',
-            '.sidearm-schedule-game-opponent-time',
-            '[class*="time"]', '.kickoff'
-        ]
-        
-        for sel in time_selectors:
-            time_elem = game_element.select_one(sel)
-            if time_elem:
-                time_str = time_elem.get_text(strip=True)
-                if time_str and time_str.upper() not in ["", "TBA", "TBD"]:
-                    break
-        
-        # Try multiple strategies to extract opponent
+        for sel in ('.sidearm-schedule-game-opponent-time', '[class*="time"]', '.kickoff'):
+            el = elem.select_one(sel)
+            if el:
+                t = el.get_text(strip=True)
+                if t.upper() not in ('TBA', 'TBD', 'TIME TBA', 'TIME TBD', ''):
+                    m = _TIME_RE.search(t)
+                    if m:
+                        time_str = m.group(1)
+                        break
+        if not time_str:
+            m = _TIME_RE.search(text)
+            if m:
+                time_str = m.group(1)
+
+        # --- Opponent ---
         opponent = ""
-        opponent_selectors = [
-            '.opponent', '.team-name', '.visitor', '.away-team', '.home-team',
+        for sel in (
             '.sidearm-schedule-game-opponent-name',
-            '[class*="opponent"]', '[class*="team"]',
-            'a[href*="team"]', 'td:nth-child(2)'
-        ]
-        
-        for sel in opponent_selectors:
-            opp_elem = game_element.select_one(sel)
-            if opp_elem:
-                opponent = opp_elem.get_text(strip=True)
-                if opponent and len(opponent) > 2:
+            '[class*="opponent-name"]',
+            '[class*="opponent"]',
+            '[class*="team-name"]',
+        ):
+            el = elem.select_one(sel)
+            if el:
+                t = re.sub(r'^\s*#?\d+\s*', '', el.get_text(strip=True))
+                t = re.sub(r'\s*\(\d+\)\s*', '', t).strip()
+                if len(t) >= 2:
+                    opponent = t
                     break
-        
-        # If still no opponent, look in all text content
+
         if not opponent:
-            all_text = game_element.get_text()
-            # Look for patterns like "vs Team" or "at Team"
-            match = re.search(r'(?:vs\.?\s+|at\s+|@\s*)([A-Za-z\s&]+)', all_text, re.IGNORECASE)
-            if match:
-                opponent = match.group(1).strip()
-        
-        # STRICT REQUIREMENT: Must have both date and opponent
-        if not date_str or not opponent:
-            logger.debug(f"Missing required data - date: '{date_str}', opponent: '{opponent}'")
+            # Regex fallback: capitalized word(s) after "vs." or "at"
+            m = re.search(
+                r'(?:vs\.?\s+|at\s+|@\s+)([A-Z][A-Za-z\s&\-\'\.]{1,40})',
+                text,
+            )
+            if m:
+                # Trim trailing noise (location text, digits)
+                candidate = re.split(r'\s{2,}|\n|\d', m.group(1))[0].strip()
+                if len(candidate) >= 2:
+                    opponent = candidate
+
+        if not opponent or len(opponent) < 2 or opponent.upper() in ('TBA', 'TBD', 'BYE'):
+            logger.debug(f"No valid opponent found; text snippet: {text[:120]}")
             return None
-        
-        # Clean opponent name
+
+        # Clean stray prefixes
         opponent = re.sub(r'^(vs\.?\s*|at\s*|@\s*)', '', opponent, flags=re.IGNORECASE).strip()
-        
-        # Final validation of opponent
-        if len(opponent) < 2 or opponent.upper() in ["TBA", "TBD", "BYE"]:
-            logger.debug(f"Invalid opponent after cleaning: '{opponent}'")
-            return None
-        
-        # Determine home/away
-        all_text = game_element.get_text().lower()
-        is_away = any(indicator in all_text for indicator in ['at ', '@ ', 'away'])
-        is_home = not is_away
-        
+
+        # --- Home/Away ---
+        # "away" keyword beats everything; then vs.=home, "at OpponentName"=away
+        text_lower = text.lower()
+        if 'away' in text_lower:
+            is_home = False
+        elif 'home' in text_lower:
+            is_home = True
+        elif re.search(r'\bvs\.?\s', text, re.I):
+            is_home = True
+        else:
+            # "at" followed by capital letter → away
+            is_home = not bool(re.search(r'\bat\s+[A-Z]', text))
+
         return {
             'date_str': date_str,
-            'time_str': time_str, 
+            'time_str': time_str,
             'opponent': opponent,
             'is_home': is_home,
-            'raw_text': game_element.get_text(strip=True)[:100]  # For debugging
+            'raw_text': text[:100],
         }
-        
+
     except Exception as e:
         logger.error(f"Error extracting game data: {e}")
         return None
@@ -522,17 +512,11 @@ def scrape_penn_state_schedule(season=None):
                 
                 response.raise_for_status()
                 soup = BeautifulSoup(response.text, 'html.parser')
-                
-                # Dynamically detect schedule structure
-                container, game_selector = detect_schedule_structure(soup)
-                
-                if not container:
-                    logger.warning(f"No schedule structure found on {url}")
+
+                game_elements = find_game_elements(soup)
+                if not game_elements:
+                    logger.warning(f"No game elements found on {url}")
                     continue
-                
-                # Extract games using detected structure
-                game_elements = container.select(game_selector)
-                logger.info(f"Found {len(game_elements)} potential game elements")
                 
                 for game_elem in game_elements:
                     game_data = extract_game_data(game_elem)
@@ -784,6 +768,33 @@ def scrape_espn_schedule(season=None):
     logger.info(f"ESPN scraper found {len(games)} games")
     return games
 
+def _find_events_in_espn_json(obj, depth=0):
+    """
+    Recursively search an ESPN API JSON response for a list of game events.
+    Returns the first list whose items look like game objects (have 'date' or
+    'competitions').  This survives ESPN schema changes without code updates.
+    """
+    if depth > 8:
+        return []
+    if isinstance(obj, list) and len(obj) >= 8:
+        if all(isinstance(i, dict) and ('date' in i or 'competitions' in i)
+               for i in obj[:3]):
+            return obj
+    if isinstance(obj, dict):
+        for key in ('events', 'schedule', 'games', 'competitions'):
+            val = obj.get(key)
+            if isinstance(val, list) and len(val) >= 8:
+                result = _find_events_in_espn_json(val, depth + 1)
+                if result:
+                    return result
+        for val in obj.values():
+            if isinstance(val, (dict, list)):
+                result = _find_events_in_espn_json(val, depth + 1)
+                if result:
+                    return result
+    return []
+
+
 def scrape_espn_api(season=None):
     """
     Use ESPN's public schedule API — returns clean JSON, bypasses HTML/JS rendering issues.
@@ -819,12 +830,8 @@ def scrape_espn_api(season=None):
         if data is None:
             data = candidate  # last attempt, will log 0 events below
 
-        events = data.get('events', [])
-        logger.info(f"ESPN API returned {len(events)} events")
-        if not events:
-            # Log the full top-level structure so we can diagnose a schema change
-            logger.warning(f"ESPN API top-level keys: {list(data.keys())}")
-            logger.warning(f"ESPN API response preview: {str(data)[:1000]}")
+        events = _find_events_in_espn_json(data)
+        logger.info(f"ESPN API: found {len(events)} events")
 
         eastern_tz = ZoneInfo("America/New_York")
 
@@ -912,120 +919,6 @@ def scrape_espn_api(season=None):
     return games
 
 
-def scrape_sports_reference(season=None):
-    """
-    Sports Reference (sports-reference.com) fallback.
-    Serves static server-side HTML with a parseable table — no JS required.
-    Table id="schedule", columns: Wk, Date, Time, Day, School, (home/away blank), Opponent, ...
-    """
-    if season is None:
-        season = get_current_season()
-
-    logger.info(f"Trying Sports Reference for season {season}")
-    games = []
-
-    try:
-        url = f"https://www.sports-reference.com/cfb/schools/penn-state/{season}-schedule.html"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-        }
-        # Sports Reference requires a small delay to avoid rate-limiting
-        time.sleep(3)
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-
-        soup = BeautifulSoup(response.text, 'html.parser')
-        table = soup.find('table', id='schedule')
-        if not table:
-            logger.warning("Sports Reference: no table#schedule found")
-            return games
-
-        # Find header row to map column indices
-        header_row = table.find('thead')
-        col_names = []
-        if header_row:
-            col_names = [th.get_text(strip=True).lower() for th in header_row.find_all('th')]
-        logger.info(f"Sports Reference columns: {col_names}")
-
-        # Map column indices
-        def col_idx(name):
-            for i, c in enumerate(col_names):
-                if name in c:
-                    return i
-            return None
-
-        date_idx = col_idx('date') or 1
-        time_idx = col_idx('time') if col_idx('time') is not None else 2
-        home_away_idx = None  # blank cell = home, "at" = away; typically col 5
-        opponent_idx = col_idx('opponent') if col_idx('opponent') is not None else 6
-
-        eastern_tz = ZoneInfo("America/New_York")
-        rows = table.find('tbody').find_all('tr') if table.find('tbody') else []
-        logger.info(f"Sports Reference: {len(rows)} rows")
-
-        for row in rows:
-            if row.get('class') and 'thead' in row.get('class', []):
-                continue  # skip mid-table header rows
-
-            cells = row.find_all(['td', 'th'])
-            if len(cells) < max(date_idx, opponent_idx) + 1:
-                continue
-
-            date_text = cells[date_idx].get_text(strip=True)
-            if not date_text or not any(c.isdigit() for c in date_text):
-                continue
-
-            # Opponent cell
-            opp_cell = cells[opponent_idx]
-            opponent = opp_cell.get_text(strip=True)
-            if not opponent or opponent.lower() in ('tba', 'tbd', 'bye'):
-                continue
-
-            # Home/away: look for an "at" cell between school and opponent (usually col 5)
-            is_away = False
-            for cell in cells:
-                if cell.get_text(strip=True).lower() in ('@', 'at'):
-                    is_away = True
-                    break
-
-            # Time
-            time_text = cells[time_idx].get_text(strip=True) if time_idx < len(cells) else ""
-
-            game_datetime = parse_date_time(date_text, time_text, season)
-            if not game_datetime:
-                logger.warning(f"Sports Reference: could not parse date '{date_text}' for {opponent}")
-                continue
-
-            if is_away:
-                title = f"Penn State at {opponent}"
-                location = ""
-            else:
-                title = f"{opponent} at Penn State"
-                location = "University Park, Pa.\nBeaver Stadium"
-
-            duration = datetime.timedelta(hours=3, minutes=30)
-            games.append({
-                'title': title,
-                'start': game_datetime,
-                'end': game_datetime + duration,
-                'location': location,
-                'broadcast': '',
-                'is_home': not is_away,
-                'opponent': opponent,
-                'date_str': date_text,
-                'time_str': time_text,
-            })
-            logger.info(f"Sports Reference: {title} on {game_datetime.strftime('%Y-%m-%d %H:%M %Z')}")
-
-    except Exception as e:
-        logger.error(f"Sports Reference error: {e}")
-
-    logger.info(f"Sports Reference scraper found {len(games)} games")
-    return games
-
-
 def scrape_schedule(season=None):
     """
     Main scraping function - STRICT validation, empty calendar if failed
@@ -1035,11 +928,9 @@ def scrape_schedule(season=None):
     
     logger.info("Starting STRICT schedule scraping...")
     
-    # Try sources in order of reliability
     sources = [
         ("ESPN API", scrape_espn_api),
         ("Penn State SIDEARM", scrape_penn_state_schedule),
-        ("Sports Reference", scrape_sports_reference),
         ("ESPN HTML", scrape_espn_schedule),
     ]
     
