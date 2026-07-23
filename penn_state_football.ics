@@ -2,36 +2,12 @@ BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:ics.py - http://git.io/lLljaA
 BEGIN:VEVENT
-DESCRIPTION:Away Game\nOpponent: Michigan Wolverines\nTime Zone: EDT -0400
-DTEND:20261017T203000Z
-LOCATION:Michigan Stadium\, Ann Arbor\, MI
-DTSTART:20261017T170000Z
-SUMMARY:Penn State at Michigan Wolverines
-UID:e9164123-3e8b-42f4-85b6-e00ebd2d939c@e916.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Away Game\nOpponent: Washington Huskies\nTime Zone: EST -0500
-DTEND:20261107T213000Z
-LOCATION:Husky Stadium\, Seattle\, WA
-DTSTART:20261107T180000Z
-SUMMARY:Penn State at Washington Huskies
-UID:b258d89e-7023-4f42-b42f-12bca7e5a0e1@b258.org
-END:VEVENT
-BEGIN:VEVENT
 DESCRIPTION:Home Game\nOpponent: Purdue Boilermakers\nTime Zone: EDT -0400
 DTEND:20261031T203000Z
 LOCATION:Beaver Stadium\, University Park\, PA
 DTSTART:20261031T170000Z
 SUMMARY:Purdue Boilermakers at Penn State
-UID:e3141a58-ea81-4518-a127-f41279065c4a@e314.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Away Game\nOpponent: Northwestern Wildcats\nTime Zone: EDT -0400
-DTEND:20261003T033000Z
-LOCATION:Ryan Field\, Evanston\, IL
-DTSTART:20261003T000000Z
-SUMMARY:Penn State at Northwestern Wildcats
-UID:b7bf8ce6-529b-4303-8e0e-b5b27ead56da@b7bf.org
+UID:5f2a1778-f7a8-4481-be03-798c89fb273d@5f2a.org
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Home Game\nOpponent: Wisconsin Badgers\nTime Zone: EDT -0400
@@ -39,15 +15,7 @@ DTEND:20260926T203000Z
 LOCATION:Beaver Stadium\, University Park\, PA
 DTSTART:20260926T170000Z
 SUMMARY:Wisconsin Badgers at Penn State
-UID:b5c79a4a-d54c-4a4f-8b63-cddf334ca9fe@b5c7.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Away Game\nOpponent: Temple Owls\nTime Zone: EDT -0400
-DTEND:20260912T193000Z
-LOCATION:Lincoln Financial Field\, Philadelphia\, PA
-DTSTART:20260912T160000Z
-SUMMARY:Penn State at Temple Owls
-UID:b9d78982-fc99-4407-b4cb-d2030b6d4f2a@b9d7.org
+UID:a74098ab-c9f9-4a6c-b054-c0dcae8d576e@a740.org
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Home Game\nOpponent: USC Trojans\nTime Zone: EDT -0400
@@ -55,15 +23,15 @@ DTEND:20261010T203000Z
 LOCATION:Beaver Stadium\, University Park\, PA
 DTSTART:20261010T170000Z
 SUMMARY:USC Trojans at Penn State
-UID:d031ecf6-7161-4617-bb72-155602e1c2a1@d031.org
+UID:fcebc05d-412b-41d7-9577-dea1dbe8d537@fceb.org
 END:VEVENT
 BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Minnesota Golden Gophers\nTime Zone: EST -0500
-DTEND:20261114T213000Z
-LOCATION:Beaver Stadium\, University Park\, PA
-DTSTART:20261114T180000Z
-SUMMARY:Minnesota Golden Gophers at Penn State
-UID:73eeb121-41d2-4074-9bf8-258a9998ecca@73ee.org
+DESCRIPTION:Away Game\nOpponent: Washington Huskies\nTime Zone: EST -0500
+DTEND:20261107T213000Z
+LOCATION:Husky Stadium\, Seattle\, WA
+DTSTART:20261107T180000Z
+SUMMARY:Penn State at Washington Huskies
+UID:7bece4c6-1009-4caa-ba40-4708726c2eb9@7bec.org
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Away Game\nOpponent: Maryland Terrapins\nTime Zone: EST -0500
@@ -71,23 +39,23 @@ DTEND:20261128T213000Z
 LOCATION:SECU Stadium\, College Park\, MD
 DTSTART:20261128T180000Z
 SUMMARY:Penn State at Maryland Terrapins
-UID:6b07db9c-25e6-4c62-943a-5196a6063969@6b07.org
+UID:8aa8dd77-abff-4ba0-8d9d-7061201cb6dc@8aa8.org
 END:VEVENT
 BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Rutgers Scarlet Knights\nTime Zone: EST -0500
-DTEND:20261121T213000Z
-LOCATION:Beaver Stadium\, University Park\, PA
-DTSTART:20261121T180000Z
-SUMMARY:Rutgers Scarlet Knights at Penn State
-UID:c563bded-42de-4c33-86d9-80135d406006@c563.org
+DESCRIPTION:Away Game\nOpponent: Michigan Wolverines\nTime Zone: EDT -0400
+DTEND:20261017T203000Z
+LOCATION:Michigan Stadium\, Ann Arbor\, MI
+DTSTART:20261017T170000Z
+SUMMARY:Penn State at Michigan Wolverines
+UID:82cda07c-da8d-4ab2-a802-433e313559db@82cd.org
 END:VEVENT
 BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Marshall Thundering Herd\nTime Zone: EDT -0400
-DTEND:20260905T230000Z
-LOCATION:Beaver Stadium\, University Park\, PA
-DTSTART:20260905T193000Z
-SUMMARY:Marshall Thundering Herd at Penn State
-UID:58f907bf-e882-4ad8-82ef-6809c0ad4722@58f9.org
+DESCRIPTION:Away Game\nOpponent: Temple Owls\nTime Zone: EDT -0400
+DTEND:20260912T193000Z
+LOCATION:Lincoln Financial Field\, Philadelphia\, PA
+DTSTART:20260912T160000Z
+SUMMARY:Penn State at Temple Owls
+UID:dfb8ee33-0941-462a-9d6b-81b5e2147cc5@dfb8.org
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Home Game\nOpponent: Buffalo Bulls\nTime Zone: EDT -0400
@@ -95,6 +63,38 @@ DTEND:20260919T193000Z
 LOCATION:Beaver Stadium\, University Park\, PA
 DTSTART:20260919T160000Z
 SUMMARY:Buffalo Bulls at Penn State
-UID:886815c0-7ef1-4b9e-9c37-9792741967ae@8868.org
+UID:19922783-48d1-4a49-bd1e-a52f203ff0b5@1992.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game\nOpponent: Marshall Thundering Herd\nTime Zone: EDT -0400
+DTEND:20260905T230000Z
+LOCATION:Beaver Stadium\, University Park\, PA
+DTSTART:20260905T193000Z
+SUMMARY:Marshall Thundering Herd at Penn State
+UID:e1737ec6-8727-4ae6-83c7-be4352f052ad@e173.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game\nOpponent: Minnesota Golden Gophers\nTime Zone: EST -0500
+DTEND:20261114T213000Z
+LOCATION:Beaver Stadium\, University Park\, PA
+DTSTART:20261114T180000Z
+SUMMARY:Minnesota Golden Gophers at Penn State
+UID:72c1b965-0179-40c4-b1be-151c6803ba3e@72c1.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Away Game\nOpponent: Northwestern Wildcats\nTime Zone: EDT -0400
+DTEND:20261003T033000Z
+LOCATION:Ryan Field\, Evanston\, IL
+DTSTART:20261003T000000Z
+SUMMARY:Penn State at Northwestern Wildcats
+UID:34a7e243-322b-4fa8-9ed2-f0626c043166@34a7.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game\nOpponent: Rutgers Scarlet Knights\nTime Zone: EST -0500
+DTEND:20261121T213000Z
+LOCATION:Beaver Stadium\, University Park\, PA
+DTSTART:20261121T180000Z
+SUMMARY:Rutgers Scarlet Knights at Penn State
+UID:e68720c2-ba8a-4d27-a603-1c94a18246b2@e687.org
 END:VEVENT
 END:VCALENDAR
