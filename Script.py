@@ -19,6 +19,104 @@ logger = logging.getLogger(__name__)
 
 CALENDAR_FILE = "penn_state_football.ics"
 
+# ESPN's team id for the Penn State Nittany Lions
+ESPN_TEAM_ID = "213"
+
+# ESPN and SIDEARM both sit behind bot detection that fingerprints the TLS
+# handshake, so a plain requests call is identifiable no matter what headers it
+# sends.  curl_cffi replays a real Chrome handshake; keep requests as a fallback
+# so the script still runs where curl_cffi is unavailable.
+try:
+    from curl_cffi import requests as curl_requests
+except ImportError:  # pragma: no cover - depends on install environment
+    curl_requests = None
+    logger.warning("curl_cffi not installed - falling back to plain requests (more likely to be blocked)")
+
+IMPERSONATE_PROFILES = ("chrome", "safari")
+
+# Statuses worth retrying: bot walls and rate limits are usually transient.
+RETRY_STATUSES = (403, 429, 500, 502, 503, 504)
+
+
+def get_browser_headers(accept_json=False):
+    """Full Chrome header set - a truncated User-Agent alone reads as a bot."""
+    headers = {
+        'User-Agent': (
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+            '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+        ),
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+    }
+    if accept_json:
+        headers.update({
+            'Accept': 'application/json, text/plain, */*',
+            'Origin': 'https://www.espn.com',
+            'Referer': 'https://www.espn.com/',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-site',
+        })
+    else:
+        headers.update({
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+        })
+    return headers
+
+
+def http_get(url, headers=None, timeout=30, retries=3, accept_json=False):
+    """
+    GET a URL through every transport we have, retrying bot-wall statuses with
+    exponential backoff.  Returns the last response (which may carry an error
+    status) or None if every attempt raised.
+    """
+    request_headers = get_browser_headers(accept_json)
+    if headers:
+        request_headers.update(headers)
+
+    attempts = []
+    if curl_requests is not None:
+        attempts.extend((f"curl_cffi[{p}]", p) for p in IMPERSONATE_PROFILES)
+    attempts.append(("requests", None))
+
+    last_response = None
+    for round_index in range(retries):
+        for label, profile in attempts:
+            try:
+                if profile is not None:
+                    response = curl_requests.get(
+                        url, headers=request_headers, timeout=timeout, impersonate=profile
+                    )
+                else:
+                    response = requests.get(url, headers=request_headers, timeout=timeout)
+            except Exception as e:
+                logger.warning(f"{label} request to {url} raised: {e}")
+                continue
+
+            if response.status_code not in RETRY_STATUSES:
+                if round_index or label != "requests":
+                    logger.info(f"{label} fetched {url} -> HTTP {response.status_code}")
+                return response
+
+            logger.warning(f"{label} got HTTP {response.status_code} from {url}")
+            last_response = response
+
+        if round_index < retries - 1:
+            delay = 2 ** round_index
+            logger.info(f"All transports blocked for {url}, retrying in {delay}s")
+            time.sleep(delay)
+
+    return last_response
+
 
 # Expected number of games per season for validation
 EXPECTED_GAMES_PER_SEASON = {
@@ -65,11 +163,20 @@ def parse_date_time(date_str, time_str="", year=None):
     try:
         if year is None:
             year = get_current_season()
-            
+
+        # The caller passes a *season*, not a calendar year; only a date string
+        # that carries its own year overrides it.
+        season_year = year
+        year_is_explicit = False
+
         # Clean inputs
         date_str = date_str.strip() if date_str else ""
         time_str = time_str.strip() if time_str else ""
-        
+
+        # AP-style month abbreviations ("Sept. 5", "Aug. 29") - drop the period
+        # so the word-and-number branches below match.
+        date_str = re.sub(rf'({_MONTH_PATTERN})\.', r'\1', date_str, flags=re.I)
+
         # gopsusports.com SIDEARM sometimes omits space: "SaturdayApr 25"
         date_str = re.sub(
             r"(?i)(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)"
@@ -102,6 +209,7 @@ def parse_date_time(date_str, time_str="", year=None):
                             year = 1900 + year_part
                         else:
                             year = 2000 + year_part
+                        year_is_explicit = True
                 except ValueError:
                     logger.error(f"Could not parse numeric date parts: {parts}")
                     return None
@@ -164,6 +272,7 @@ def parse_date_time(date_str, time_str="", year=None):
             parts = date_str.split('-')
             try:
                 year = int(parts[0])
+                year_is_explicit = True
                 month = int(parts[1])
                 day = int(parts[2])
             except ValueError:
@@ -174,7 +283,14 @@ def parse_date_time(date_str, time_str="", year=None):
         if month is None or day is None:
             logger.error(f"Failed to parse date: {date_str} - month={month}, day={day}")
             return None
-        
+
+        # Schedule pages print "Jan. 1" with no year because the season straddles
+        # New Year: Aug-Dec belong to the season year, Jan-Jul (bowls, CFP) to the
+        # calendar year after it.
+        if not year_is_explicit and month <= 7:
+            year = season_year + 1
+            logger.debug(f"Month {month} rolls into the next calendar year: {year}")
+
         # Parse time - default to 1pm ET if no time provided
         hour, minute = 13, 0  # Default to 1pm ET for college football
         
@@ -249,7 +365,8 @@ def parse_date_time(date_str, time_str="", year=None):
             result = datetime.datetime(year, month, day, hour, minute, tzinfo=eastern_tz)
             
             # Additional validation: check if date is reasonable for football season
-            if result.month < 8 or result.month > 12:
+            # (Jan-Feb is normal - bowls and the playoff run past New Year.)
+            if 3 <= result.month <= 7:
                 logger.warning(f"Date outside typical football season: {result}")
                 # Still allow it, but log warning
             
@@ -313,22 +430,51 @@ def validate_schedule(games, season):
     
     return True
 
-_DATE_RE = re.compile(
-    r'\b((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|'
-    r'Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)'
-    r'\s+\d{1,2})\b',
-    re.I,
+_MONTH_PATTERN = (
+    r'(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|'
+    r'Jul(?:y)?|Aug(?:ust)?|Sept?(?:ember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)'
 )
+# gopsusports writes dates AP-style - "Sept. 5", "Aug. 29" - so the trailing
+# period is optional and "Sept" is accepted alongside "Sep"/"September".
+_DATE_RE = re.compile(rf'\b({_MONTH_PATTERN}\.?\s+\d{{1,2}})\b', re.I)
+_NUMERIC_DATE_RE = re.compile(r'\b(\d{1,2}/\d{1,2}(?:/\d{2,4})?)\b')
 _TIME_RE = re.compile(r'\b(\d{1,2}:\d{2}\s*[AP]M)\b', re.I)
+
+
+def _has_date(text):
+    """True if the text carries a game date in either supported form."""
+    return bool(_DATE_RE.search(text) or _NUMERIC_DATE_RE.search(text))
+
+
+# Row classes SIDEARM has used for a game entry, newest template first.
+KNOWN_GAME_CLASSES = (
+    'schedule-event',
+    'sidearm-schedule-game',
+    'schedule-event-item',
+)
 
 
 def find_game_elements(soup):
     """
-    Detect game elements by structural repetition + date content.
-    Looks for any repeated li/div/article that recurs 6-18 times and
-    contains a month+day pattern — no class names assumed.
+    Detect game elements by known SIDEARM row classes, then fall back to
+    structural repetition + date content (any repeated li/div/article that
+    recurs 6-30 times and contains a date) so a template change still parses.
     """
     from collections import Counter
+
+    # Fast path: the current gopsusports template tags each game row.
+    for class_name in KNOWN_GAME_CLASSES:
+        elems = soup.find_all(class_=class_name)
+        if len(elems) < 6:
+            continue
+        dated = [e for e in elems if _has_date(e.get_text())]
+        if len(dated) >= 6:
+            logger.info(f"Found {len(dated)} game elements by class '{class_name}'")
+            return dated
+        logger.warning(
+            f"Class '{class_name}' matched {len(elems)} elements but only "
+            f"{len(dated)} carried a date - falling back to content detection"
+        )
 
     counts = Counter()
     by_key = {}
@@ -343,10 +489,10 @@ def find_game_elements(soup):
 
     best, best_score = [], 0
     for key, count in counts.items():
-        if not (6 <= count <= 18):
+        if not (6 <= count <= 30):
             continue
         elems = by_key[key]
-        dated = [e for e in elems if _DATE_RE.search(e.get_text())]
+        dated = [e for e in elems if _has_date(e.get_text())]
         if len(dated) >= 6 and len(dated) > best_score:
             best_score = len(dated)
             best = dated
@@ -407,20 +553,27 @@ def extract_game_data(elem):
                 time_str = m.group(1)
 
         # --- Opponent ---
+        # The current template lists both teams in the row, so take the first
+        # name that is not Penn State itself.
         opponent = ""
         for sel in (
             '.sidearm-schedule-game-opponent-name',
             '[class*="opponent-name"]',
-            '[class*="opponent"]',
+            '[class*="team__name"]',
             '[class*="team-name"]',
+            '[class*="opponent"]',
         ):
-            el = elem.select_one(sel)
-            if el:
-                t = re.sub(r'^\s*#?\d+\s*', '', el.get_text(strip=True))
+            for el in elem.select(sel):
+                t = re.sub(r'^\s*#?\d+\s*', '', el.get_text(' ', strip=True))
                 t = re.sub(r'\s*\(\d+\)\s*', '', t).strip()
-                if len(t) >= 2:
-                    opponent = t
-                    break
+                if len(t) < 2 or t.upper() in ('TBA', 'TBD'):
+                    continue
+                if 'penn state' in t.lower() or t.upper() == 'PSU':
+                    continue
+                opponent = t
+                break
+            if opponent:
+                break
 
         if not opponent:
             # Regex fallback: capitalized word(s) after "vs." or "at"
@@ -441,10 +594,43 @@ def extract_game_data(elem):
         # Clean stray prefixes
         opponent = re.sub(r'^(vs\.?\s*|at\s*|@\s*)', '', opponent, flags=re.IGNORECASE).strip()
 
+        # --- Broadcast ---
+        # SIDEARM shows "TBA" in the TV slot until the network is assigned; that
+        # is a broadcaster placeholder, not schedule data, so drop it.
+        broadcast = ""
+        for sel in (
+            '[class*="tv-network"]',
+            '[class*="tv-networks"]',
+            '[class*="tv-link"]',
+            '[class*="broadcast"]',
+            '[class*="network"]',
+        ):
+            el = elem.select_one(sel)
+            if not el:
+                continue
+            t = re.sub(r'^\s*(TV|Watch|Live)\s*:\s*', '', el.get_text(' ', strip=True), flags=re.I).strip()
+            if t and t.upper() not in ('TBA', 'TBD', 'TV TBA'):
+                broadcast = t
+            break
+
+        # --- Location ---
+        location = ""
+        for sel in ('[class*="venue-text"]', '[class*="location-text"]', '[class*="location"]', '[class*="venue"]'):
+            el = elem.select_one(sel)
+            if el:
+                t = el.get_text(' ', strip=True)
+                if t and t.upper() not in ('TBA', 'TBD'):
+                    location = t
+                break
+
         # --- Home/Away ---
-        # "away" keyword beats everything; then vs.=home, "at OpponentName"=away
+        # The template marks the venue side explicitly; fall back to text cues.
         text_lower = text.lower()
-        if 'away' in text_lower:
+        if elem.select_one('[class*="venue--away"]'):
+            is_home = False
+        elif elem.select_one('[class*="venue--home"]'):
+            is_home = True
+        elif 'away' in text_lower:
             is_home = False
         elif 'home' in text_lower:
             is_home = True
@@ -459,6 +645,8 @@ def extract_game_data(elem):
             'time_str': time_str,
             'opponent': opponent,
             'is_home': is_home,
+            'broadcast': broadcast,
+            'location': location,
             'raw_text': text[:100],
         }
 
@@ -476,31 +664,32 @@ def scrape_penn_state_schedule(season=None):
     
     try:
         headers = get_sidearm_headers()
-        session = requests.Session()
-        session.headers.update(headers)
-        
+
         # Try the schedule page with multiple approaches
         base_urls = [
             "https://gopsusports.com/sports/football/schedule",
-            f"https://gopsusports.com/sports/football/schedule/{season}",
-            f"https://gopsusports.com/schedule?sport=football&season={season}",
+            f"https://gopsusports.com/sports/football/schedule?season={season}",
         ]
-        
+
         for url in base_urls:
             try:
                 logger.info(f"Trying URL: {url}")
-                
+
                 # Add delay to avoid being flagged as bot
                 time.sleep(2)
-                
-                response = session.get(url, timeout=30)
-                
+
+                response = http_get(url, headers=headers, timeout=30)
+                if response is None:
+                    logger.warning(f"No response from {url}")
+                    continue
+
                 response_text_lower = response.text.lower()
                 # SIDEARM includes a hidden "Ad Blocker Detected" modal in normal pages; only
                 # treat ad-blocker copy as a wall when schedule markup is missing.
                 has_schedule_markup = (
                     "sidearm-schedule-games" in response_text_lower
                     or "sidearm-schedule-game" in response_text_lower
+                    or "schedule-event" in response_text_lower
                 )
                 adblock_wall_copy = (
                     "ad blocker" in response_text_lower
@@ -529,13 +718,14 @@ def scrape_penn_state_schedule(season=None):
                     opponent = game_data['opponent']
                     is_home = game_data['is_home']
                     
+                    location = game_data.get('location', '')
                     if is_home:
                         title = f"{opponent} at Penn State"
-                        location = "University Park, Pa.\nBeaver Stadium"
+                        if not location:
+                            location = "University Park, Pa.\nBeaver Stadium"
                     else:
                         title = f"Penn State at {opponent}"
-                        location = ""
-                    
+
                     # STRICT: Parse datetime - if it fails, skip this game entirely
                     game_datetime = parse_date_time(game_data['date_str'], game_data['time_str'], season)
                     
@@ -550,7 +740,7 @@ def scrape_penn_state_schedule(season=None):
                         'start': game_datetime,  # Already timezone-aware in Eastern Time
                         'end': game_datetime + duration,  # This will also be timezone-aware
                         'location': location,
-                        'broadcast': "",
+                        'broadcast': game_data.get('broadcast', ''),
                         'is_home': is_home,
                         'opponent': opponent,
                         'date_str': game_data['date_str'],
@@ -592,15 +782,18 @@ def scrape_espn_schedule(season=None):
             
         logger.info(f"ESPN URL: {url}")
         
-        response = requests.get(url, headers=headers, timeout=30)
-        
+        response = http_get(url, headers=headers, timeout=30)
+        if response is None:
+            logger.warning("ESPN HTML: no response")
+            return games
+
         response_text_lower = response.text.lower()
         if response.status_code == 202 or (
             "awswaf" in response_text_lower and "challenge-container" in response_text_lower
         ):
             logger.warning(
                 "ESPN returned an AWS WAF challenge page instead of schedule HTML "
-                "(plain requests often cannot complete the challenge; rely on SIDEARM or use curl_cffi / a browser)"
+                "(the JS challenge needs a real browser; rely on the ESPN APIs or SIDEARM)"
             )
             return games
         
@@ -807,28 +1000,39 @@ def scrape_espn_api(season=None):
     games = []
 
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json',
-        }
-        # Try seasontype=2 (regular season) explicitly; some years need it
+        # Spread across ESPN's API hosts: they sit behind different edges, so a
+        # bot wall on one does not usually apply to the others.  seasontype=2
+        # (regular season) is requested explicitly; some years need it.
         urls_to_try = [
-            f"https://site.api.espn.com/apis/site/v2/sports/football/college-football/teams/213/schedule?season={season}&seasontype=2",
-            f"https://site.api.espn.com/apis/site/v2/sports/football/college-football/teams/213/schedule?season={season}",
+            f"https://site.api.espn.com/apis/site/v2/sports/football/college-football/teams/{ESPN_TEAM_ID}/schedule?season={season}&seasontype=2",
+            f"https://site.api.espn.com/apis/site/v2/sports/football/college-football/teams/{ESPN_TEAM_ID}/schedule?season={season}",
+            f"https://site.web.api.espn.com/apis/site/v2/sports/football/college-football/teams/{ESPN_TEAM_ID}/schedule?season={season}&seasontype=2",
+            f"https://cdn.espn.com/core/college-football/team/schedule/_/id/{ESPN_TEAM_ID}/season/{season}?xhr=1",
         ]
         data = None
         for api_url in urls_to_try:
             logger.info(f"ESPN API url: {api_url}")
-            response = requests.get(api_url, headers=headers, timeout=30)
-            response.raise_for_status()
-            candidate = response.json()
-            if candidate.get('events'):
+            response = http_get(api_url, timeout=30, accept_json=True)
+            if response is None:
+                logger.warning(f"No response from {api_url}")
+                continue
+            if response.status_code != 200:
+                logger.warning(f"ESPN API {api_url} returned HTTP {response.status_code}")
+                continue
+            try:
+                candidate = response.json()
+            except Exception as e:
+                logger.warning(f"ESPN API {api_url} did not return JSON: {e}")
+                continue
+            if _find_events_in_espn_json(candidate):
                 data = candidate
                 break
             logger.warning(f"No events at {api_url}, keys: {list(candidate.keys())}")
             logger.warning(f"Response preview: {str(candidate)[:500]}")
+
         if data is None:
-            data = candidate  # last attempt, will log 0 events below
+            logger.error("ESPN API: no endpoint returned a usable schedule payload")
+            return games
 
         events = _find_events_in_espn_json(data)
         logger.info(f"ESPN API: found {len(events)} events")
@@ -919,6 +1123,91 @@ def scrape_espn_api(season=None):
     return games
 
 
+def scrape_espn_core_api(season=None):
+    """
+    ESPN's "core" API (sports.core.api.espn.com) - a different host and schema
+    from the site API, so it usually survives a bot wall on site.api.  It returns
+    a list of $ref links, so each event is fetched individually.
+    """
+    if season is None:
+        season = get_current_season()
+
+    logger.info(f"Trying ESPN core API for season {season}")
+    games = []
+
+    try:
+        index_url = (
+            "https://sports.core.api.espn.com/v2/sports/football/leagues/college-football/"
+            f"seasons/{season}/teams/{ESPN_TEAM_ID}/events?limit=50"
+        )
+        response = http_get(index_url, timeout=30, accept_json=True)
+        if response is None or response.status_code != 200:
+            status = response.status_code if response is not None else "no response"
+            logger.error(f"ESPN core API index failed: {status}")
+            return games
+
+        items = response.json().get('items', [])
+        logger.info(f"ESPN core API: {len(items)} event refs")
+
+        eastern_tz = ZoneInfo("America/New_York")
+
+        for item in items:
+            ref = item.get('$ref')
+            if not ref:
+                continue
+            try:
+                # The refs come back as http:// - request them over TLS.
+                event_response = http_get(ref.replace('http://', 'https://'), timeout=30, accept_json=True)
+                if event_response is None or event_response.status_code != 200:
+                    continue
+                event = event_response.json()
+
+                date_str = event.get('date', '')
+                name = event.get('name', '')
+                if not date_str or ' at ' not in name:
+                    continue
+
+                # "name" reads "<away team> at <home team>"
+                away_name, home_name = [part.strip() for part in name.split(' at ', 1)]
+                is_home = 'penn state' in home_name.lower()
+                opponent = away_name if is_home else home_name
+                if 'penn state' in opponent.lower():
+                    continue
+
+                dt_utc = datetime.datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                game_datetime = dt_utc.astimezone(eastern_tz)
+                # Midnight UTC is ESPN's placeholder for an unannounced kickoff.
+                if dt_utc.hour == 0 and dt_utc.minute == 0:
+                    date_et = game_datetime.date()
+                    game_datetime = datetime.datetime(
+                        date_et.year, date_et.month, date_et.day, 13, 0, tzinfo=eastern_tz
+                    )
+
+                title = f"{opponent} at Penn State" if is_home else f"Penn State at {opponent}"
+                games.append({
+                    'title': title,
+                    'start': game_datetime,
+                    'end': game_datetime + datetime.timedelta(hours=3, minutes=30),
+                    'location': "University Park, Pa.\nBeaver Stadium" if is_home else "",
+                    'broadcast': "",
+                    'is_home': is_home,
+                    'opponent': opponent,
+                    'date_str': date_str,
+                    'time_str': game_datetime.strftime('%I:%M %p %Z'),
+                })
+                logger.info(f"ESPN core API: {title} on {game_datetime.strftime('%Y-%m-%d %H:%M %Z')}")
+
+            except Exception as e:
+                logger.error(f"Error parsing ESPN core API event: {e}")
+                continue
+
+    except Exception as e:
+        logger.error(f"ESPN core API error: {e}")
+
+    logger.info(f"ESPN core API scraper found {len(games)} games")
+    return games
+
+
 def scrape_schedule(season=None):
     """
     Main scraping function - STRICT validation, empty calendar if failed
@@ -930,6 +1219,7 @@ def scrape_schedule(season=None):
     
     sources = [
         ("ESPN API", scrape_espn_api),
+        ("ESPN core API", scrape_espn_core_api),
         ("Penn State SIDEARM", scrape_penn_state_schedule),
         ("ESPN HTML", scrape_espn_schedule),
     ]
