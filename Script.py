@@ -1123,91 +1123,6 @@ def scrape_espn_api(season=None):
     return games
 
 
-def scrape_espn_core_api(season=None):
-    """
-    ESPN's "core" API (sports.core.api.espn.com) - a different host and schema
-    from the site API, so it usually survives a bot wall on site.api.  It returns
-    a list of $ref links, so each event is fetched individually.
-    """
-    if season is None:
-        season = get_current_season()
-
-    logger.info(f"Trying ESPN core API for season {season}")
-    games = []
-
-    try:
-        index_url = (
-            "https://sports.core.api.espn.com/v2/sports/football/leagues/college-football/"
-            f"seasons/{season}/teams/{ESPN_TEAM_ID}/events?limit=50"
-        )
-        response = http_get(index_url, timeout=30, accept_json=True)
-        if response is None or response.status_code != 200:
-            status = response.status_code if response is not None else "no response"
-            logger.error(f"ESPN core API index failed: {status}")
-            return games
-
-        items = response.json().get('items', [])
-        logger.info(f"ESPN core API: {len(items)} event refs")
-
-        eastern_tz = ZoneInfo("America/New_York")
-
-        for item in items:
-            ref = item.get('$ref')
-            if not ref:
-                continue
-            try:
-                # The refs come back as http:// - request them over TLS.
-                event_response = http_get(ref.replace('http://', 'https://'), timeout=30, accept_json=True)
-                if event_response is None or event_response.status_code != 200:
-                    continue
-                event = event_response.json()
-
-                date_str = event.get('date', '')
-                name = event.get('name', '')
-                if not date_str or ' at ' not in name:
-                    continue
-
-                # "name" reads "<away team> at <home team>"
-                away_name, home_name = [part.strip() for part in name.split(' at ', 1)]
-                is_home = 'penn state' in home_name.lower()
-                opponent = away_name if is_home else home_name
-                if 'penn state' in opponent.lower():
-                    continue
-
-                dt_utc = datetime.datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-                game_datetime = dt_utc.astimezone(eastern_tz)
-                # Midnight UTC is ESPN's placeholder for an unannounced kickoff.
-                if dt_utc.hour == 0 and dt_utc.minute == 0:
-                    date_et = game_datetime.date()
-                    game_datetime = datetime.datetime(
-                        date_et.year, date_et.month, date_et.day, 13, 0, tzinfo=eastern_tz
-                    )
-
-                title = f"{opponent} at Penn State" if is_home else f"Penn State at {opponent}"
-                games.append({
-                    'title': title,
-                    'start': game_datetime,
-                    'end': game_datetime + datetime.timedelta(hours=3, minutes=30),
-                    'location': "University Park, Pa.\nBeaver Stadium" if is_home else "",
-                    'broadcast': "",
-                    'is_home': is_home,
-                    'opponent': opponent,
-                    'date_str': date_str,
-                    'time_str': game_datetime.strftime('%I:%M %p %Z'),
-                })
-                logger.info(f"ESPN core API: {title} on {game_datetime.strftime('%Y-%m-%d %H:%M %Z')}")
-
-            except Exception as e:
-                logger.error(f"Error parsing ESPN core API event: {e}")
-                continue
-
-    except Exception as e:
-        logger.error(f"ESPN core API error: {e}")
-
-    logger.info(f"ESPN core API scraper found {len(games)} games")
-    return games
-
-
 def scrape_schedule(season=None):
     """
     Main scraping function - STRICT validation, empty calendar if failed
@@ -1219,7 +1134,6 @@ def scrape_schedule(season=None):
     
     sources = [
         ("ESPN API", scrape_espn_api),
-        ("ESPN core API", scrape_espn_core_api),
         ("Penn State SIDEARM", scrape_penn_state_schedule),
         ("ESPN HTML", scrape_espn_schedule),
     ]
