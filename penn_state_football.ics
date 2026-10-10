@@ -2,36 +2,20 @@ BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:ics.py - http://git.io/lLljaA
 BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Purdue Boilermakers\nTime Zone: EDT -0400
-DTEND:20261031T203000Z
-LOCATION:Beaver Stadium\, University Park\, PA
-DTSTART:20261031T170000Z
-SUMMARY:Purdue Boilermakers at Penn State
-UID:0683901b-80ab-4b2e-a87d-224a7f162bc7@0683.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: USC Trojans\nTime Zone: EDT -0400
-DTEND:20261011T030000Z
-LOCATION:Beaver Stadium\, University Park\, PA
-DTSTART:20261010T233000Z
-SUMMARY:USC Trojans at Penn State
-UID:26e461af-400a-4115-a941-94e5d42c4d49@26e4.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Away Game\nOpponent: Temple Owls\nTime Zone: EDT -0400
-DTEND:20260912T193000Z
-LOCATION:Lincoln Financial Field\, Philadelphia\, PA
-DTSTART:20260912T160000Z
-SUMMARY:Penn State at Temple Owls
-UID:e9ff6ca7-794d-4d94-9186-4d8dd5cd5309@e9ff.org
-END:VEVENT
-BEGIN:VEVENT
 DESCRIPTION:Home Game\nOpponent: Buffalo Bulls\nTime Zone: EDT -0400
 DTEND:20260919T193000Z
 LOCATION:Beaver Stadium\, University Park\, PA
 DTSTART:20260919T160000Z
 SUMMARY:Buffalo Bulls at Penn State
-UID:3ba87dd7-4e93-4793-9fe4-45635487038c@3ba8.org
+UID:93f756ed-7c94-4d8c-ac2e-196997306b25@93f7.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game\nOpponent: Purdue Boilermakers\nTime Zone: EDT -0400
+DTEND:20261031T203000Z
+LOCATION:Beaver Stadium\, University Park\, PA
+DTSTART:20261031T170000Z
+SUMMARY:Purdue Boilermakers at Penn State
+UID:35950200-592b-4ad0-804f-f22779296c06@3595.org
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Away Game\nOpponent: Michigan Wolverines\nTime Zone: EDT -0400
@@ -39,15 +23,7 @@ DTEND:20261017T203000Z
 LOCATION:Michigan Stadium\, Ann Arbor\, MI
 DTSTART:20261017T170000Z
 SUMMARY:Penn State at Michigan Wolverines
-UID:c04a238e-851b-43c4-a19f-9c7b76a20a73@c04a.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Away Game\nOpponent: Washington Huskies\nTime Zone: EST -0500
-DTEND:20261107T213000Z
-LOCATION:Husky Stadium\, Seattle\, WA
-DTSTART:20261107T180000Z
-SUMMARY:Penn State at Washington Huskies
-UID:51490403-f4ba-44d5-a8bd-b34c8281d6c0@5149.org
+UID:c067f9d7-ae20-486d-bc6e-7e15ef2eb3d8@c067.org
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Home Game\nOpponent: Rutgers Scarlet Knights\nTime Zone: EST -0500
@@ -55,39 +31,7 @@ DTEND:20261121T213000Z
 LOCATION:Beaver Stadium\, University Park\, PA
 DTSTART:20261121T180000Z
 SUMMARY:Rutgers Scarlet Knights at Penn State
-UID:463d5759-d34e-4054-93b1-9c97b1e3e1f8@463d.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Wisconsin Badgers\nTime Zone: EDT -0400
-DTEND:20260927T003000Z
-LOCATION:Beaver Stadium\, University Park\, PA
-DTSTART:20260926T210000Z
-SUMMARY:Wisconsin Badgers at Penn State
-UID:c659faa9-6cf6-42e0-8f51-fc3b8f8c9b44@c659.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Marshall Thundering Herd\nTime Zone: EDT -0400
-DTEND:20260905T230000Z
-LOCATION:Beaver Stadium\, University Park\, PA
-DTSTART:20260905T193000Z
-SUMMARY:Marshall Thundering Herd at Penn State
-UID:81304298-1e4b-4a05-8fa6-2e07b9427a5a@8130.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Home Game\nOpponent: Minnesota Golden Gophers\nTime Zone: EST -0500
-DTEND:20261114T213000Z
-LOCATION:Beaver Stadium\, University Park\, PA
-DTSTART:20261114T180000Z
-SUMMARY:Minnesota Golden Gophers at Penn State
-UID:122cd8cf-d4f2-441c-ab15-a20432843ebe@122c.org
-END:VEVENT
-BEGIN:VEVENT
-DESCRIPTION:Away Game\nOpponent: Maryland Terrapins\nTime Zone: EST -0500
-DTEND:20261128T213000Z
-LOCATION:SECU Stadium\, College Park\, MD
-DTSTART:20261128T180000Z
-SUMMARY:Penn State at Maryland Terrapins
-UID:b610ed6a-38c5-4e33-90b5-f61e09570b42@b610.org
+UID:58d5dd05-fc52-4ca4-9cae-8de8dfad7265@58d5.org
 END:VEVENT
 BEGIN:VEVENT
 DESCRIPTION:Away Game\nOpponent: Northwestern Wildcats\nTime Zone: EDT -0400
@@ -95,6 +39,62 @@ DTEND:20261003T033000Z
 LOCATION:Ryan Field\, Evanston\, IL
 DTSTART:20261003T000000Z
 SUMMARY:Penn State at Northwestern Wildcats
-UID:b818ff10-4b1d-4736-9958-eb43cca0aa32@b818.org
+UID:35b49af8-8014-4101-8bdf-c6f2c5068a20@35b4.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Away Game\nOpponent: Washington Huskies\nTime Zone: EST -0500
+DTEND:20261107T213000Z
+LOCATION:Husky Stadium\, Seattle\, WA
+DTSTART:20261107T180000Z
+SUMMARY:Penn State at Washington Huskies
+UID:d2cfcca1-4bb5-449b-9f3f-abc8d9a7829c@d2cf.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game\nOpponent: Minnesota Golden Gophers\nTime Zone: EST -0500
+DTEND:20261114T213000Z
+LOCATION:Beaver Stadium\, University Park\, PA
+DTSTART:20261114T180000Z
+SUMMARY:Minnesota Golden Gophers at Penn State
+UID:98f23839-c4e6-42cf-b7d9-288b17498af6@98f2.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game\nOpponent: Wisconsin Badgers\nTime Zone: EDT -0400
+DTEND:20260927T003000Z
+LOCATION:Beaver Stadium\, University Park\, PA
+DTSTART:20260926T210000Z
+SUMMARY:Wisconsin Badgers at Penn State
+UID:23e7841c-888f-4e09-b4c9-93a1a4ba2b21@23e7.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Away Game\nOpponent: Maryland Terrapins\nTime Zone: EST -0500
+DTEND:20261128T213000Z
+LOCATION:SECU Stadium\, College Park\, MD
+DTSTART:20261128T180000Z
+SUMMARY:Penn State at Maryland Terrapins
+UID:63ab53b3-0e3d-47b0-953e-b5abf2d14d17@63ab.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game\nOpponent: USC Trojans\nTime Zone: EDT -0400
+DTEND:20261011T030000Z
+LOCATION:Beaver Stadium\, University Park\, PA
+DTSTART:20261010T233000Z
+SUMMARY:USC Trojans at Penn State
+UID:a9b19981-0728-4afa-a8a5-4bfae1d736e3@a9b1.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Home Game\nOpponent: Marshall Thundering Herd\nTime Zone: EDT -0400
+DTEND:20260905T230000Z
+LOCATION:Beaver Stadium\, University Park\, PA
+DTSTART:20260905T193000Z
+SUMMARY:Marshall Thundering Herd at Penn State
+UID:41675d06-6bee-427d-86b0-27a27686b354@4167.org
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Away Game\nOpponent: Temple Owls\nTime Zone: EDT -0400
+DTEND:20260912T193000Z
+LOCATION:Lincoln Financial Field\, Philadelphia\, PA
+DTSTART:20260912T160000Z
+SUMMARY:Penn State at Temple Owls
+UID:23f1a83c-49b9-4541-85c2-e27586c1e438@23f1.org
 END:VEVENT
 END:VCALENDAR
